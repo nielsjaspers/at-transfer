@@ -1,0 +1,30 @@
+{
+  "lexicon": 1,
+  "id": "app.at-transfer.signalanswer",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "WebRTC signaling answer with optional file metadata for AT-Transfer, echoing the session timestamp.",
+      "properties": {
+        "sdp": {
+          "type": "string",
+          "description": "Session Description Protocol (SDP) answer"
+        },
+        "fileName": {
+          "type": "string",
+          "description": "File name (echoed back if provided in offer)"
+        },
+        "fileSize": {
+          "type": "integer",
+          "description": "File size (echoed back if provided in offer)"
+        },
+        "sessionTimestamp": {
+          "type": "string",
+          "format": "datetime",
+          "description": "Timestamp (ISO8601 format) from the corresponding offer, used to link the answer to the offer."
+        }
+      },
+      "required": ["sdp", "sessionTimestamp"]
+    }
+  }
+}
