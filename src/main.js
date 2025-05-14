@@ -142,10 +142,8 @@ function showReceivePanel() {
 // Follows official atproto OAuth pattern for persistent sessions
 async function setupOAuthClient() {
     oauthClient = new BrowserOAuthClient({
+        clientId: "https://at-transfer.dev.nielsjaspers.com/client_metadata.json",
         handleResolver: "https://bsky.social",
-        // For localhost dev, clientMetadata is not needed.
-        // For production, see package docs for client_id/client_metadata.
-        // clientMetadata: { ... } // <-- Uncomment and fill for production
     });
     // Try to restore session or handle OAuth callback
     const result = await oauthClient.init();
