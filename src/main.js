@@ -18,6 +18,8 @@ let receiverDataChannel = null;
 let fileToSend = null;
 let currentOfferSessionTimestamp = null;
 let receivedFileBuffer = [];
+let receivedFileName = "received_file";
+let receivedFileType = "application/octet-stream";
 
 document.addEventListener("DOMContentLoaded", () => {
     initUI();
@@ -101,6 +103,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 logDebug("Receiver", `Offer intended for ${offerRecord.intendedReceiverDid}, not ${receiverAgent.session.did}`);
                 return;
             }
+            // Store fileName and fileType for use in download link
+            receivedFileName = offerRecord.fileName || "received_file";
+            receivedFileType = offerRecord.fileType || "application/octet-stream";
 
             logDebug("Receiver", `Offer record fetched (session: ${offerRecord.sessionTimestamp.slice(-10)}). Creating answer...`);
             setStatus("receiverStatus", `Offer (session: ${offerRecord.sessionTimestamp.slice(-10)}) fetched. Preparing answer...`, "info");
@@ -276,11 +281,12 @@ document.addEventListener("DOMContentLoaded", () => {
             logDebug("Receiver", "Data channel CLOSED.");
             elements.receiverStatus.textContent = "Data channel closed. Assembling file...";
             if (receivedFileBuffer.length > 0) {
-                const url = assembleFile(receivedFileBuffer, "received_file", "application/octet-stream");
+                const url = assembleFile(receivedFileBuffer, receivedFileName, receivedFileType);
                 elements.receivedFileLink.href = url;
-                elements.receivedFileLink.download = "received_file";
+                elements.receivedFileLink.download = receivedFileName;
+                elements.receivedFileLink.textContent = `Download ${receivedFileName} (${Math.round((receivedFileBuffer.reduce((sum, chunk) => sum + (chunk instanceof ArrayBuffer ? chunk.byteLength : 0), 0)) / 1024)} KB)`;
                 elements.receivedFileLink.style.display = "block";
-                elements.receiverStatus.textContent = "File received!";
+                elements.receiverStatus.textContent = "File received and assembled! Download link should be visible.";
             }
         };
         dc.onerror = (error) => { logDebug("Receiver", `Data channel error: ${error}`); elements.receiverStatus.textContent = `DC Error: ${error}`; };
