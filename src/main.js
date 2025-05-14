@@ -1,5 +1,4 @@
-import { BrowserOAuthClient } from "@atproto/oauth-client-browser";
-import { Agent } from "@atproto/api";
+import { AtpAgent } from "@atproto/api";
 import { setStatus } from "./ui/status.js";
 import {
     postOffer,
@@ -12,7 +11,6 @@ import { sendFileInChunks, assembleFile } from "./webrtc/fileTransfer.js";
 import { ICE_SERVERS } from "./webrtc/peer.js";
 
 // ---- STATE ----
-let oauthClient = null;
 let agent = null;
 let session = null;
 let userDid = null;
@@ -26,44 +24,40 @@ let receivedFileBuffer = [];
 let receivedFileName = "received_file";
 let receivedFileType = "application/octet-stream";
 
+// Session persistence keys
+const SESSION_KEY = "at-transfer-session";
+const SERVICE_KEY = "at-transfer-service";
+
 // ---- UI SETUP ----
 function renderLoginScreen() {
     const app = document.getElementById("app");
     app.innerHTML = `
     <div class="panel" id="loginPanel">
       <h2>AT-Transfer</h2>
-      <p>Sign in with your Bluesky account to start transferring files peer-to-peer.</p>
-      <label for="loginHandleInput">Your Handle or DID</label>
+      <p>Sign in with your Bluesky App Password to start transferring files peer-to-peer.</p>
+      <label for="loginHandleInput">Handle or DID</label>
       <input id="loginHandleInput" type="text" placeholder="your.handle.bsky.social or did:plc:..." autocomplete="username" style="width:100%;margin-bottom:12px;" />
-      <button id="oauthLoginBtn" class="oauth-btn">Sign in with Bluesky</button>
+      <label for="loginPasswordInput">App Password</label>
+      <input id="loginPasswordInput" type="password" placeholder="App Password" autocomplete="current-password" style="width:100%;margin-bottom:12px;" />
+      <button id="loginBtn" class="login-btn">Sign in</button>
       <div id="loginStatus" class="status"></div>
       <p style="font-size:0.95em;color:#888;margin-top:18px;">
-        <b>Security note:</b> OAuth login is handled by Bluesky. Never enter your main password into third-party apps.
+        <b>Security note:</b> Use a Bluesky App Password, not your main password.
       </p>
     </div>
   `;
-    document.getElementById("oauthLoginBtn").onclick = async () => {
-        const handleOrDid = document
-            .getElementById("loginHandleInput")
-            .value.trim();
-        if (!handleOrDid) {
-            setStatus(
-                "loginStatus",
-                "Please enter your handle or DID.",
-                "error",
-            );
+    document.getElementById("loginBtn").onclick = async () => {
+        const handleOrDid = document.getElementById("loginHandleInput").value.trim();
+        const password = document.getElementById("loginPasswordInput").value;
+        if (!handleOrDid || !password) {
+            setStatus("loginStatus", "Please enter your handle and app password.", "error");
             return;
         }
-        setStatus("loginStatus", "Redirecting to Bluesky...", "info");
+        setStatus("loginStatus", "Logging in...", "info");
         try {
-            await oauthClient.signIn(handleOrDid);
-            // Will redirect to Bluesky and back
+            await doAppPasswordLogin(handleOrDid, password);
         } catch (e) {
-            setStatus(
-                "loginStatus",
-                "OAuth login failed: " + e.message,
-                "error",
-            );
+            setStatus("loginStatus", "Login failed: " + e.message, "error");
         }
     };
 }
@@ -86,7 +80,7 @@ function renderDashboard() {
     document.getElementById("chooseReceiveBtn").onclick = () =>
         showReceivePanel();
     document.getElementById("logoutBtn").onclick = async () => {
-        await oauthClient.signOut();
+        clearSession();
         window.location.reload();
     };
 }
@@ -138,27 +132,54 @@ function showReceivePanel() {
     };
 }
 
-// ---- OAUTH SESSION MANAGEMENT ----
-// Follows official atproto OAuth pattern for persistent sessions
-async function setupOAuthClient() {
-    oauthClient = new BrowserOAuthClient({
-        clientId: "https://at-transfer.dev.nielsjaspers.com/client_metadata.json",
-        handleResolver: "https://bsky.social",
-    });
-    // Try to restore session or handle OAuth callback
-    const result = await oauthClient.init();
-    if (result && result.session) {
-        session = result.session;
-        agent = new Agent(session); // Pass session directly as per docs
-        userDid = session.sub;
-        userHandle = session.handle;
-        return true;
+// ---- APP PASSWORD SESSION MANAGEMENT ----
+
+async function doAppPasswordLogin(identifier, password) {
+    // Discover PDS endpoint for handle or DID
+    let serviceUrl = "https://bsky.social"; // Default PDS
+    if (identifier.startsWith("did:")) {
+        try {
+            serviceUrl = await getPdsEndpointForDid(identifier);
+        } catch (e) {
+            throw new Error("Failed to discover PDS for DID: " + e.message);
+        }
     }
-    session = null;
+    agent = new AtpAgent({ service: serviceUrl });
+    const res = await agent.login({ identifier, password });
+    session = agent.session;
+    userDid = agent.session.did;
+    userHandle = agent.session.handle;
+    // Persist session and service
+    localStorage.setItem(SESSION_KEY, JSON.stringify(agent.session));
+    localStorage.setItem(SERVICE_KEY, serviceUrl);
+    renderDashboard();
+}
+
+function clearSession() {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SERVICE_KEY);
     agent = null;
+    session = null;
     userDid = null;
     userHandle = null;
-    return false;
+}
+
+async function tryRestoreSession() {
+    const sessionStr = localStorage.getItem(SESSION_KEY);
+    const serviceUrl = localStorage.getItem(SERVICE_KEY) || "https://bsky.social";
+    if (!sessionStr) return false;
+    try {
+        const sess = JSON.parse(sessionStr);
+        agent = new AtpAgent({ service: serviceUrl });
+        await agent.resumeSession(sess);
+        session = agent.session;
+        userDid = agent.session.did;
+        userHandle = agent.session.handle;
+        return true;
+    } catch (e) {
+        clearSession();
+        return false;
+    }
 }
 
 // ---- SEND FLOW ----
@@ -467,8 +488,8 @@ function setupReceiverDataChannelEvents(dc) {
 
 // ---- APP INIT ----
 document.addEventListener("DOMContentLoaded", async () => {
-    const loggedIn = await setupOAuthClient();
-    if (!loggedIn) {
+    const restored = await tryRestoreSession();
+    if (!restored) {
         renderLoginScreen();
         return;
     }
