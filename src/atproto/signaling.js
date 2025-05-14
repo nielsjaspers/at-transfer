@@ -17,7 +17,7 @@ export async function postOffer(senderAgent, receiverIdentifier, offerObj) {
 
         // Post offer to sender's own repo (PoC style)
         await senderAgent.com.atproto.repo.putRecord({
-            repo: senderAgent.session.did,
+            repo: senderAgent.did,
             collection: OFFER_COLLECTION,
             rkey: RECORD_RKEY,
             record: {
@@ -65,7 +65,7 @@ export async function postAnswer(receiverAgent, senderDid, answerObj) {
     try {
         // Post answer to receiver's own repo (PoC style)
         await receiverAgent.com.atproto.repo.putRecord({
-            repo: receiverAgent.session.did,
+            repo: receiverAgent.did,
             collection: ANSWER_COLLECTION,
             rkey: RECORD_RKEY,
             record: {

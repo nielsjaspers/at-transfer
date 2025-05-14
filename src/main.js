@@ -139,21 +139,27 @@ function showReceivePanel() {
 }
 
 // ---- OAUTH SESSION MANAGEMENT ----
+// Follows official atproto OAuth pattern for persistent sessions
 async function setupOAuthClient() {
     oauthClient = new BrowserOAuthClient({
         handleResolver: "https://bsky.social",
         // For localhost dev, clientMetadata is not needed.
         // For production, see package docs for client_id/client_metadata.
+        // clientMetadata: { ... } // <-- Uncomment and fill for production
     });
     // Try to restore session or handle OAuth callback
     const result = await oauthClient.init();
     if (result && result.session) {
         session = result.session;
-        agent = new Agent(session);
+        agent = new Agent(session); // Pass session directly as per docs
         userDid = session.sub;
         userHandle = session.handle;
         return true;
     }
+    session = null;
+    agent = null;
+    userDid = null;
+    userHandle = null;
     return false;
 }
 
@@ -184,33 +190,45 @@ async function sendOfferFlow() {
         setupSenderDataChannelEvents(dataChannel);
 
         peerConnection.onicecandidate = async (event) => {
-            if (event.candidate) return;
+            if (event.candidate) return; // Wait for all candidates
             setStatus("sendStatus", "Posting offer...", "info");
             try {
                 const offerSdp = peerConnection.localDescription;
-                await agent.com.atproto.repo.putRecord({
-                    repo: agent.session.did,
-                    collection: "app.at-transfer.signaloffer",
-                    rkey: "self",
-                    record: {
-                        $type: "app.at-transfer.signaloffer",
-                        createdAt: new Date().toISOString(),
-                        sdp: offerSdp.sdp,
-                        fileName: fileToSend.name,
-                        fileSize: fileToSend.size,
-                        sessionTimestamp: currentOfferSessionTimestamp,
-                        intendedReceiverDid: resolvedReceiverDid,
-                    },
-                });
-                setStatus(
-                    "sendStatus",
-                    "Offer posted. Waiting for answer...",
-                    "info",
-                );
-                pollForAnswer(
+                const offerDetails = {
+                    $type: "app.at-transfer.signaloffer",
+                    createdAt: new Date().toISOString(),
+                    sdp: offerSdp.sdp,
+                    fileName: fileToSend.name,
+                    fileSize: fileToSend.size,
+                    sessionTimestamp: currentOfferSessionTimestamp,
+                    // intendedReceiverDid will be added by postOffer in signaling.js
+                };
+
+                // Use postOffer from signaling.js
+                // resolvedReceiverDid is from the outer scope of sendOfferFlow
+                const actualPostedReceiverDid = await postOffer(
+                    agent,
                     resolvedReceiverDid,
-                    currentOfferSessionTimestamp,
+                    offerDetails,
                 );
+
+                if (actualPostedReceiverDid) {
+                    setStatus(
+                        "sendStatus",
+                        "Offer posted. Waiting for answer...",
+                        "info",
+                    );
+                    pollForAnswer(
+                        actualPostedReceiverDid, // Use the DID returned by postOffer
+                        currentOfferSessionTimestamp,
+                    );
+                } else {
+                    setStatus(
+                        "sendStatus",
+                        "Failed to post offer (receiver DID not resolved/returned).",
+                        "error",
+                    );
+                }
             } catch (e) {
                 setStatus(
                     "sendStatus",
@@ -271,7 +289,7 @@ async function pollForAnswer(receiverDid, offerSessionTimestamp) {
             const answerRecord = record.data.value;
             if (
                 answerRecord.offerSessionTimestamp === offerSessionTimestamp &&
-                answerRecord.intendedSenderDid === agent.session.did
+                answerRecord.intendedSenderDid === agent.did
             ) {
                 setStatus("sendStatus", "Answer found. Applying...", "success");
                 await peerConnection.setRemoteDescription(
@@ -324,7 +342,7 @@ async function fetchOfferFlow() {
         const offerRecord = record.data.value;
         if (
             offerRecord.intendedReceiverDid &&
-            offerRecord.intendedReceiverDid !== agent.session.did
+            offerRecord.intendedReceiverDid !== agent.did
         ) {
             setStatus(
                 "receiveStatus",
