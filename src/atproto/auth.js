@@ -1,62 +1,87 @@
-import { AtpAgent } from '@atproto/api';
+import { BrowserOAuthClient } from '@atproto/oauth-client-browser'
+import { Agent } from '@atproto/api'
 
-export let senderAgent = null;
-export let receiverAgent = null;
+const BLUESKY_HANDLE_RESOLVER = 'https://bsky.social'
+
+let oauthClient = null
+let session = null
+let agent = null
 
 /**
- * Sets up login event handlers for sender and receiver panels using AtpAgent.
- * Expects UI elements with specific IDs to exist in the DOM.
+ * Initialize the OAuth client and restore session if available.
+ * Returns { loggedIn: boolean, session, agent }
  */
-export function setupAuthHandlers() {
-  // Sender login
-  const senderLoginBtn = document.getElementById('senderLoginButton');
-  if (senderLoginBtn) {
-    senderLoginBtn.addEventListener('click', async () => {
-      const pdsUrl = document.getElementById('senderPdsUrlInput').value.trim();
-      const handle = document.getElementById('senderLoginIdInput').value.trim();
-      const password = document.getElementById('senderPasswordInput').value;
-      const status = document.getElementById('senderLoginStatus');
-      status.textContent = 'Logging in...';
-      try {
-        senderAgent = new AtpAgent({ service: pdsUrl });
-        await senderAgent.login({ identifier: handle, password });
-        status.textContent = `Logged in as Sender: ${senderAgent.session.did}`;
-        status.style.color = 'green';
-        console.log(`[Sender] Logged in: ${senderAgent.session.did}`);
-      } catch (e) {
-        status.textContent = 'Login failed';
-        status.style.color = 'red';
-        console.log(`[Sender] Login failed: ${e.message}`);
-      }
-    });
-  }
+export async function initOAuth() {
+  oauthClient = new BrowserOAuthClient({
+    handleResolver: BLUESKY_HANDLE_RESOLVER,
+    // For localhost dev, no clientMetadata needed.
+    // For production, see package docs for client_id/client_metadata.
+  })
 
-  // Receiver login
-  const receiverLoginBtn = document.getElementById('receiverLoginButton');
-  if (receiverLoginBtn) {
-    receiverLoginBtn.addEventListener('click', async () => {
-      const pdsUrl = document.getElementById('receiverPdsUrlInput').value.trim();
-      const handle = document.getElementById('receiverLoginIdInput').value.trim();
-      const password = document.getElementById('receiverPasswordInput').value;
-      const status = document.getElementById('receiverLoginStatus');
-      status.textContent = 'Logging in...';
-      try {
-        receiverAgent = new AtpAgent({ service: pdsUrl });
-        await receiverAgent.login({ identifier: handle, password });
-        status.textContent = `Logged in as Receiver: ${receiverAgent.session.did}`;
-        status.style.color = 'green';
-        console.log(`[Receiver] Logged in: ${receiverAgent.session.did}`);
-      } catch (e) {
-        status.textContent = 'Login failed';
-        status.style.color = 'red';
-        console.log(`[Receiver] Login failed: ${e.message}`);
-      }
-    });
+  // This will restore session if available or handle OAuth callback.
+  const result = await oauthClient.init()
+  if (result && result.session) {
+    session = result.session
+    agent = new Agent(session)
+    return { loggedIn: true, session, agent }
   }
+  session = null
+  agent = null
+  return { loggedIn: false }
 }
 
 /**
- * Utility to log debug messages to the debug log area.
- * @param {string} msg
+ * Start OAuth login flow. Requires a handle or DID.
+ * This will redirect to Bluesky for authentication.
  */
+export async function startOAuthLogin(handleOrDid) {
+  if (!oauthClient) throw new Error('OAuth client not initialized')
+  await oauthClient.signIn(handleOrDid)
+  // This will redirect, so code after this will not run.
+}
 
+/**
+ * Logout and clear session.
+ */
+export async function logout() {
+  if (oauthClient && session) {
+    await oauthClient.signOut(session.sub)
+  }
+  session = null
+  agent = null
+}
+
+/**
+ * Get the current session (or null if not logged in).
+ */
+export function getSession() {
+  return session
+}
+
+/**
+ * Get the current Agent (or null if not logged in).
+ */
+export function getAgent() {
+  return agent
+}
+
+/**
+ * Get the current user's DID (or null if not logged in).
+ */
+export function getCurrentDid() {
+  return session ? session.sub : null
+}
+
+/**
+ * Get the current user's handle (or null if not logged in).
+ */
+export function getCurrentHandle() {
+  return session ? session.handle : null
+}
+
+/**
+ * Returns true if the user is logged in.
+ */
+export function isLoggedIn() {
+  return !!session
+}
