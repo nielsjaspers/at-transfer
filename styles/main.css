@@ -1,0 +1,101 @@
+body {
+  font-family: system-ui, sans-serif;
+  background: #f7f7fa;
+  margin: 0;
+  padding: 0;
+}
+
+.panel {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  margin: 24px auto;
+  max-width: 480px;
+  padding: 24px 32px 16px 32px;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+label, input, button {
+  font-size: 1rem;
+}
+
+label {
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+input[type="text"], input[type="password"] {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+input[type="file"] {
+  margin-bottom: 12px;
+}
+
+button {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 4px;
+  background: #2a7cff;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 6px;
+}
+
+button:disabled {
+  background: #b3c7f7;
+  cursor: not-allowed;
+}
+
+.status {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.95em;
+  color: #666;
+  vertical-align: middle;
+  min-width: 80px;
+}
+
+#debugLogAreaContainer {
+  margin: 32px auto 0 auto;
+  max-width: 600px;
+  background: #f3f3f8;
+  border-radius: 8px;
+  padding: 16px 20px 12px 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+
+#debugLogArea {
+  width: 100%;
+  min-height: 80px;
+  max-height: 220px;
+  background: #222;
+  color: #d6f7d6;
+  font-family: "Fira Mono", "Consolas", monospace;
+  font-size: 0.98em;
+  border-radius: 4px;
+  padding: 10px;
+  overflow-y: auto;
+  margin-top: 8px;
+  margin-bottom: 0;
+  box-sizing: border-box;
+}
+
+#receivedFileLink {
+  display: block;
+  margin-top: 16px;
+  font-size: 1.08em;
+  color: #2a7cff;
+  text-decoration: underline;
+  word-break: break-all;
+}
