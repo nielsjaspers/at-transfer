@@ -22,11 +22,11 @@ export function setupAuthHandlers() {
         await senderAgent.login({ identifier: handle, password });
         status.textContent = `Logged in as Sender: ${senderAgent.session.did}`;
         status.style.color = 'green';
-        logDebug(`[Sender] Logged in: ${senderAgent.session.did}`);
+        console.log(`[Sender] Logged in: ${senderAgent.session.did}`);
       } catch (e) {
         status.textContent = 'Login failed';
         status.style.color = 'red';
-        logDebug(`[Sender] ${e.message}`);
+        console.log(`[Sender] Login failed: ${e.message}`);
       }
     });
   }
@@ -45,11 +45,11 @@ export function setupAuthHandlers() {
         await receiverAgent.login({ identifier: handle, password });
         status.textContent = `Logged in as Receiver: ${receiverAgent.session.did}`;
         status.style.color = 'green';
-        logDebug(`[Receiver] Logged in: ${receiverAgent.session.did}`);
+        console.log(`[Receiver] Logged in: ${receiverAgent.session.did}`);
       } catch (e) {
         status.textContent = 'Login failed';
         status.style.color = 'red';
-        logDebug(`[Receiver] ${e.message}`);
+        console.log(`[Receiver] Login failed: ${e.message}`);
       }
     });
   }
@@ -59,10 +59,4 @@ export function setupAuthHandlers() {
  * Utility to log debug messages to the debug log area.
  * @param {string} msg
  */
-function logDebug(msg) {
-  const area = document.getElementById('debugLogArea');
-  if (area) {
-    area.value += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-    area.scrollTop = area.scrollHeight;
-  }
-}
+

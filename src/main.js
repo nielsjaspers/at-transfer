@@ -8,7 +8,7 @@ import { elements } from "./ui/elements.js";
 import { postOffer, fetchOffer, postAnswer, fetchAnswer } from "./atproto/signaling.js";
 import { resolveHandleToDid, getPdsEndpointForDid } from "./atproto/did.js";
 import { sendFileInChunks, assembleFile } from "./webrtc/fileTransfer.js";
-import { setStatus, logDebug } from "./ui/status.js";
+import { setStatus } from "./ui/status.js";
 import { ICE_SERVERS } from "./webrtc/peer.js";
 
 let senderPeerConnection = null;
@@ -30,7 +30,7 @@ document.addEventListener("DOMContentLoaded", () => {
     elements.fileInput.addEventListener('change', (event) => {
         fileToSend = event.target.files[0];
         if (fileToSend) {
-            logDebug("Sender", `File selected: ${fileToSend.name} (${fileToSend.size} bytes)`);
+            console.log(`[Sender] File selected: ${fileToSend.name} (${fileToSend.size} bytes)`);
             elements.senderStatus.textContent = `Selected: ${fileToSend.name}`;
         }
     });
@@ -42,12 +42,12 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
         setStatus("senderStatus", "Preparing offer...", "info");
-        logDebug("Sender", "Preparing offer...");
+        console.log("[Sender] Preparing offer to send file...");
         currentOfferSessionTimestamp = new Date().toISOString();
 
         try {
             const resolvedReceiverDid = await resolveHandleToDid(elements.senderDidInput.value.trim(), senderAgent);
-            logDebug("Sender", `Target Receiver DID: ${resolvedReceiverDid}`);
+            console.log(`[Sender] Resolved target Receiver DID: ${resolvedReceiverDid}`);
 
             senderPeerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
             setupSenderPeerEvents(senderPeerConnection, resolvedReceiverDid, currentOfferSessionTimestamp);
@@ -60,7 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // SDP will be posted in onicecandidate when all candidates are gathered
         } catch (e) {
             setStatus("senderStatus", `Offer Error: ${e.message}`, "error");
-            logDebug("Sender", `Offer creation error: ${e.message}`);
+            console.log(`[Sender] Error during offer creation: ${e.message}`);
         }
     });
 
@@ -71,16 +71,16 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
         setStatus("receiverStatus", "Fetching offer...", "info");
-        logDebug("Receiver", "Fetching offer...");
+        console.log("[Receiver] Fetching offer from sender...");
         receivedFileBuffer = [];
         elements.receivedFileLink.style.display = 'none';
 
         try {
             const resolvedSenderDid = await resolveHandleToDid(elements.receiverDidInput.value.trim(), receiverAgent);
-            logDebug("Receiver", `Target Sender DID: ${resolvedSenderDid}`);
+            console.log(`[Receiver] Resolved target Sender DID: ${resolvedSenderDid}`);
 
             const senderPdsUrl = await getPdsEndpointForDid(resolvedSenderDid);
-            logDebug("Receiver", `Fetching offer from sender PDS: ${senderPdsUrl} for DID: ${resolvedSenderDid}`);
+            console.log(`[Receiver] Fetching offer from sender PDS endpoint: ${senderPdsUrl} for sender DID: ${resolvedSenderDid}`);
             const { AtpAgent } = await import('@atproto/api');
             const tempAgent = new AtpAgent({ service: senderPdsUrl });
 
@@ -92,29 +92,29 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (!record?.data?.value) {
                 setStatus("receiverStatus", "No offer found from sender.", "error");
-                logDebug("Receiver", "No offer record found.");
+                console.log("[Receiver] No offer record found.");
                 return;
             }
 
             const offerRecord = record.data.value;
-            logDebug("Receiver", `Fetched offer record: ${JSON.stringify(offerRecord)}`);
+            console.log(`[Receiver] Fetched offer record from sender: ${JSON.stringify(offerRecord)}`);
             if (offerRecord.intendedReceiverDid && offerRecord.intendedReceiverDid !== receiverAgent.session.did) {
                 setStatus("receiverStatus", `Offer found (session: ${offerRecord.sessionTimestamp.slice(-10)}), but not intended for you.`, "error");
-                logDebug("Receiver", `Offer intended for ${offerRecord.intendedReceiverDid}, not ${receiverAgent.session.did}`);
+                console.log(`[Receiver] Offer intended for DID ${offerRecord.intendedReceiverDid}, but receiver is ${receiverAgent.session.did}`);
                 return;
             }
             // Store fileName and fileType for use in download link
             receivedFileName = offerRecord.fileName || "received_file";
             receivedFileType = offerRecord.fileType || "application/octet-stream";
 
-            logDebug("Receiver", `Offer record fetched (session: ${offerRecord.sessionTimestamp.slice(-10)}). Creating answer...`);
+            console.log(`[Receiver] Offer record fetched (session: ${offerRecord.sessionTimestamp.slice(-10)}). Creating answer for sender.`);
             setStatus("receiverStatus", `Offer (session: ${offerRecord.sessionTimestamp.slice(-10)}) fetched. Preparing answer...`, "info");
 
             receiverPeerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
             setupReceiverPeerEvents(receiverPeerConnection, resolvedSenderDid, offerRecord.sessionTimestamp);
 
             receiverPeerConnection.ondatachannel = (event) => {
-                logDebug("Receiver", "Data channel received!");
+                console.log("[Receiver] Data channel received from sender. Ready to receive file.");
                 receiverDataChannel = event.channel;
                 setupReceiverDataChannelEvents(receiverDataChannel);
             };
@@ -125,7 +125,7 @@ document.addEventListener("DOMContentLoaded", () => {
             // SDP answer will be posted in onicecandidate
         } catch (e) {
             setStatus("receiverStatus", `Fetch/Answer Error: ${e.message}`, "error");
-            logDebug("Receiver", `Fetch/Answer error: ${e.message}`);
+            console.log(`[Receiver] Error during fetch/answer: ${e.message}`);
         }
     });
 
@@ -135,7 +135,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (event.candidate) {
                 // ICE candidate gathering in progress
             } else {
-                logDebug("Sender", "All ICE candidates gathered. SDP offer complete. Posting to ATProto...");
+                console.log("[Sender] All ICE candidates gathered. SDP offer complete. Posting to ATProto...");
                 elements.senderStatus.textContent = "SDP offer ready. Posting...";
                 try {
                     const offerSdp = pc.localDescription;
@@ -154,24 +154,24 @@ document.addEventListener("DOMContentLoaded", () => {
                         }
                     });
                     elements.senderStatus.textContent = `Offer posted (session: ${sessionTimestamp.slice(-10)}). Waiting for answer...`;
-                    logDebug("Sender", `Offer posted with sessionTimestamp: ${sessionTimestamp}`);
+                    console.log(`[Sender] Offer posted with sessionTimestamp: ${sessionTimestamp}`);
                     pollForAnswer(targetReceiverDid, sessionTimestamp);
                 } catch (e) {
                     elements.senderStatus.textContent = `Failed to post offer: ${e.message}`;
-                    logDebug("Sender", `Failed to post offer: ${e.message}`);
+                    console.log(`[Sender] Failed to post offer: ${e.message}`);
                 }
             }
         };
         pc.onconnectionstatechange = () => {
-            logDebug("Sender", `Connection state: ${pc.connectionState}`);
+            console.log(`[Sender] PeerConnection state changed: ${pc.connectionState}`);
             elements.senderStatus.textContent = `Connection: ${pc.connectionState}`;
-            if (pc.connectionState === 'connected') { logDebug("Sender", "PEERS CONNECTED!"); }
+            if (pc.connectionState === 'connected') { console.log("[Sender] PEERS CONNECTED!"); }
         };
     }
 
     function setupSenderDataChannelEvents(dc) {
         dc.onopen = () => {
-            logDebug("Sender", "Data channel OPEN. Starting file transfer.");
+            console.log("[Sender] Data channel is open. Starting file transfer to receiver.");
             elements.senderStatus.textContent = "Data channel open. Sending file...";
             if (fileToSend && dc.readyState === "open") {
                 sendFileInChunks(fileToSend, dc, (sent, total) => {
@@ -181,18 +181,18 @@ document.addEventListener("DOMContentLoaded", () => {
                     dc.close();
                 });
             } else {
-                logDebug("Sender", "Data channel open but fileToSend or data channel not ready.");
+                console.log("[Sender] Data channel open but fileToSend or data channel not ready.");
             }
         };
-        dc.onclose = () => { logDebug("Sender", "Data channel CLOSED."); elements.senderStatus.textContent = "Data channel closed."; };
-        dc.onerror = (error) => { logDebug("Sender", `Data channel error: ${error}`); elements.senderStatus.textContent = `DC Error: ${error}`; };
+        dc.onclose = () => { console.log("[Sender] Data channel closed after file transfer."); elements.senderStatus.textContent = "Data channel closed."; };
+        dc.onerror = (error) => { console.log(`[Sender] Data channel error: ${error}`); elements.senderStatus.textContent = `DC Error: ${error}`; };
     }
 
     async function pollForAnswer(receiverDid, offerSessionTimestamp) {
-        logDebug("Sender", `Polling for answer from ${receiverDid} for offer session ${offerSessionTimestamp.slice(-10)}...`);
+        console.log(`[Sender] Polling for answer from receiver DID ${receiverDid} for offer session ${offerSessionTimestamp.slice(-10)}...`);
         try {
             const receiverPdsUrl = await getPdsEndpointForDid(receiverDid);
-            logDebug("Sender", `Polling answer from receiver PDS: ${receiverPdsUrl} for DID: ${receiverDid}`);
+            console.log(`[Sender] Polling answer from receiver PDS endpoint: ${receiverPdsUrl} for receiver DID: ${receiverDid}`);
             const { AtpAgent } = await import('@atproto/api');
             const tempAgent = new AtpAgent({ service: receiverPdsUrl });
 
@@ -204,21 +204,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (record?.data?.value) {
                 const answerRecord = record.data.value;
-                logDebug("Sender", `Fetched answer record: ${JSON.stringify(answerRecord)}`);
+                console.log(`[Sender] Fetched answer record from receiver: ${JSON.stringify(answerRecord)}`);
                 if (answerRecord.offerSessionTimestamp === offerSessionTimestamp &&
                     answerRecord.intendedSenderDid === senderAgent.session.did) {
-                    logDebug("Sender", "Matching answer record found!");
+                    console.log("[Sender] Matching answer record found! Applying remote description.");
                     elements.senderStatus.textContent = "Answer found. Applying...";
                     await senderPeerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: answerRecord.sdp }));
-                    logDebug("Sender", "Remote description (answer) set.");
+                    console.log("[Sender] Remote description (answer) successfully set on PeerConnection.");
                     return;
                 } else {
-                    logDebug("Sender", `Found answer, but for different session/sender. Expected offerTS: ${offerSessionTimestamp.slice(-10)}, Got: ${answerRecord.offerSessionTimestamp?.slice(-10)}`);
+                    console.log(`[Sender] Found answer, but for different session/sender. Expected offerTS: ${offerSessionTimestamp.slice(-10)}, Got: ${answerRecord.offerSessionTimestamp?.slice(-10)}`);
                 }
             } else {
-                logDebug("Sender", "No answer record found yet.");
+                console.log("[Sender] No answer record found yet for this session.");
             }
-        } catch (e) { logDebug("Sender", `Poll error (or no answer yet): ${e.message}`); }
+        } catch (e) { console.log(`[Sender] Poll error (or no answer yet): ${e.message}`); }
         setTimeout(() => pollForAnswer(receiverDid, offerSessionTimestamp), 5000);
     }
 
@@ -227,7 +227,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (event.candidate) {
                 // ICE candidate gathering in progress
             } else {
-                logDebug("Receiver", "All ICE candidates gathered. SDP answer complete. Posting to ATProto...");
+                console.log("[Receiver] All ICE candidates gathered. SDP answer complete. Posting to ATProto...");
                 elements.receiverStatus.textContent = "SDP answer ready. Posting...";
                 try {
                     const answerSdp = pc.localDescription;
@@ -244,22 +244,22 @@ document.addEventListener("DOMContentLoaded", () => {
                         }
                     });
                     elements.receiverStatus.textContent = `Answer posted for offer session ${offerSessionTimestamp.slice(-10)}.`;
-                    logDebug("Receiver", `Answer posted for offer session ${offerSessionTimestamp}`);
+                    console.log(`[Receiver] Answer posted for offer session ${offerSessionTimestamp}`);
                 } catch (e) {
                     elements.receiverStatus.textContent = `Failed to post answer: ${e.message}`;
-                    logDebug("Receiver", `Failed to post answer: ${e.message}`);
+                    console.log(`[Receiver] Failed to post answer: ${e.message}`);
                 }
             }
         };
         pc.onconnectionstatechange = () => {
-            logDebug("Receiver", `Connection state: ${pc.connectionState}`);
+            console.log(`[Receiver] PeerConnection state changed: ${pc.connectionState}`);
             elements.receiverStatus.textContent = `Connection: ${pc.connectionState}`;
-            if (pc.connectionState === 'connected') { logDebug("Receiver", "PEERS CONNECTED!"); }
+            if (pc.connectionState === 'connected') { console.log("[Receiver] PEERS CONNECTED!"); }
         };
     }
 
     function setupReceiverDataChannelEvents(dc) {
-        dc.onopen = () => { logDebug("Receiver", "Data channel OPEN."); elements.receiverStatus.textContent = "Data channel open. Receiving..."; };
+        console.log("[Receiver] Data channel is open. Ready to receive file data.");
         dc.onmessage = (event) => {
             if (typeof event.data === "string") {
                 // handle EOF or metadata
@@ -278,7 +278,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         };
         dc.onclose = () => {
-            logDebug("Receiver", "Data channel CLOSED.");
+            console.log("[Receiver] Data channel closed after file reception.");
             elements.receiverStatus.textContent = "Data channel closed. Assembling file...";
             if (receivedFileBuffer.length > 0) {
                 const url = assembleFile(receivedFileBuffer, receivedFileName, receivedFileType);
@@ -289,6 +289,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 elements.receiverStatus.textContent = "File received and assembled! Download link should be visible.";
             }
         };
-        dc.onerror = (error) => { logDebug("Receiver", `Data channel error: ${error}`); elements.receiverStatus.textContent = `DC Error: ${error}`; };
+        dc.onerror = (error) => { console.log(`[Receiver] Data channel error: ${error}`); elements.receiverStatus.textContent = `DC Error: ${error}`; };
     }
 });

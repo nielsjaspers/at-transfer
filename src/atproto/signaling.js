@@ -3,7 +3,7 @@
 
 import { AtpAgent } from "@atproto/api";
 import { getPdsEndpointForDid, resolveHandleToDid } from "./did.js";
-import { logDebug, setStatus } from "../ui/status.js";
+import { setStatus } from "../ui/status.js";
 
 const OFFER_COLLECTION = "app.at-transfer.signaloffer";
 const ANSWER_COLLECTION = "app.at-transfer.signalanswer";
@@ -13,7 +13,7 @@ export async function postOffer(senderAgent, receiverIdentifier, offerObj) {
     try {
         // Resolve receiver DID using senderAgent
         const resolvedReceiverDid = await resolveHandleToDid(receiverIdentifier, senderAgent);
-        logDebug(`Target Receiver DID: ${resolvedReceiverDid}`);
+        console.log(`[Sender] Target Receiver DID: ${resolvedReceiverDid}`);
 
         // Post offer to sender's own repo (PoC style)
         await senderAgent.com.atproto.repo.putRecord({
@@ -26,11 +26,11 @@ export async function postOffer(senderAgent, receiverIdentifier, offerObj) {
             },
         });
         setStatus("senderStatus", "Offer posted", "success");
-        logDebug("Offer posted successfully");
+        console.log("[Sender] Offer posted successfully");
         return resolvedReceiverDid;
     } catch (err) {
         setStatus("senderStatus", "Failed to post offer", "error");
-        logDebug(`Error posting offer: ${err.message}`);
+        console.log(`[Sender] Error posting offer: ${err.message}`);
         throw err;
     }
 }
@@ -39,7 +39,7 @@ export async function fetchOffer(receiverAgent, senderIdentifier) {
     try {
         // Resolve sender DID using receiverAgent
         const resolvedSenderDid = await resolveHandleToDid(senderIdentifier, receiverAgent);
-        logDebug(`Target Sender DID: ${resolvedSenderDid}`);
+        console.log(`[Receiver] Target Sender DID: ${resolvedSenderDid}`);
 
         // Discover sender's PDS endpoint
         const senderPdsUrl = await getPdsEndpointForDid(resolvedSenderDid);
@@ -52,11 +52,11 @@ export async function fetchOffer(receiverAgent, senderIdentifier) {
             rkey: RECORD_RKEY,
         });
 
-        logDebug("Fetched offer record");
+        console.log("[Receiver] Fetched offer record");
         return { offer: record.data?.value, resolvedSenderDid };
     } catch (err) {
         setStatus("receiverStatus", "No offer found", "error");
-        logDebug("No offer found or error fetching offer");
+        console.log("[Receiver] No offer found or error fetching offer");
         return { offer: null, resolvedSenderDid: null };
     }
 }
@@ -74,10 +74,10 @@ export async function postAnswer(receiverAgent, senderDid, answerObj) {
             },
         });
         setStatus("receiverStatus", "Answer posted", "success");
-        logDebug("Answer posted successfully");
+        console.log("[Receiver] Answer posted successfully");
     } catch (err) {
         setStatus("receiverStatus", "Failed to post answer", "error");
-        logDebug(`Error posting answer: ${err.message}`);
+        console.log(`[Receiver] Error posting answer: ${err.message}`);
         throw err;
     }
 }
@@ -95,11 +95,11 @@ export async function fetchAnswer(senderAgent, receiverDid) {
             rkey: RECORD_RKEY,
         });
 
-        logDebug("Fetched answer record");
+        console.log("[Sender] Fetched answer record");
         return record.data?.value;
     } catch (err) {
         setStatus("senderStatus", "No answer found", "error");
-        logDebug("No answer found or error fetching answer");
+        console.log("[Sender] No answer found or error fetching answer");
         return null;
     }
 }

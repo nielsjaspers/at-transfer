@@ -10,15 +10,15 @@ export function setupSenderDataChannelEvents(
     { onOpen, onClose, onError } = {},
 ) {
     dataChannel.onopen = (event) => {
-        logDebug("Sender data channel open");
+        console.log("[Sender] Data channel open");
         if (onOpen) onOpen(event);
     };
     dataChannel.onclose = (event) => {
-        logDebug("Sender data channel closed");
+        console.log("[Sender] Data channel closed");
         if (onClose) onClose(event);
     };
     dataChannel.onerror = (event) => {
-        logDebug("Sender data channel error: " + event.error);
+        console.log("[Sender] Data channel error: " + event.error);
         if (onError) onError(event);
     };
 }
@@ -36,15 +36,15 @@ export function setupReceiverDataChannelEvents(
     { onOpen, onClose, onError, onMessage } = {},
 ) {
     dataChannel.onopen = (event) => {
-        logDebug("Receiver data channel open");
+        console.log("[Receiver] Data channel open");
         if (onOpen) onOpen(event);
     };
     dataChannel.onclose = (event) => {
-        logDebug("Receiver data channel closed");
+        console.log("[Receiver] Data channel closed");
         if (onClose) onClose(event);
     };
     dataChannel.onerror = (event) => {
-        logDebug("Receiver data channel error: " + event.error);
+        console.log("[Receiver] Data channel error: " + event.error);
         if (onError) onError(event);
     };
     dataChannel.onmessage = (event) => {
@@ -52,15 +52,4 @@ export function setupReceiverDataChannelEvents(
     };
 }
 
-/**
- * Utility function to log debug messages to the debug log area.
- * This should be replaced by a more robust logger if needed.
- * @param {string} msg
- */
-function logDebug(msg) {
-    const logArea = document.getElementById("debugLogArea");
-    if (logArea) {
-        logArea.value += `[dataChannel] ${msg}\n`;
-        logArea.scrollTop = logArea.scrollHeight;
-    }
-}
+
