@@ -321,7 +321,7 @@ async function pollForAnswer(receiverDid, offerSessionTimestamp) {
             }
         }
     } catch (e) {}
-    setTimeout(() => pollForAnswer(receiverDid, offerSessionTimestamp), 5000);
+    setTimeout(() => pollForAnswer(receiverDid, offerSessionTimestamp), 1000);
 }
 
 // ---- RECEIVE FLOW ----
@@ -441,11 +441,13 @@ function setupReceiverDataChannelEvents(dc) {
             try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === "EOF") {
+                    console.log("Received EOF");
                     return;
                 }
             } catch {}
         } else if (event.data instanceof ArrayBuffer) {
             receivedFileBuffer.push(event.data);
+            console.log("Received chunk, total:", receivedFileBuffer.length);
             let receivedBytes = receivedFileBuffer.reduce(
                 (sum, chunk) =>
                     sum + (chunk instanceof ArrayBuffer ? chunk.byteLength : 0),
@@ -464,6 +466,7 @@ function setupReceiverDataChannelEvents(dc) {
             "Data channel closed. Assembling file...",
             "info",
         );
+        console.log("Buffer length on close:", receivedFileBuffer.length);
         if (receivedFileBuffer.length > 0) {
             const url = assembleFile(
                 receivedFileBuffer,
@@ -480,6 +483,8 @@ function setupReceiverDataChannelEvents(dc) {
                 "File received and assembled! Download link should be visible.",
                 "success",
             );
+        } else {
+            setStatus("receiveStatus", "No data received.", "error");
         }
     };
     dc.onerror = (error) =>

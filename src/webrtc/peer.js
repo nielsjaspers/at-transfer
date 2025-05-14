@@ -1,7 +1,14 @@
 // WebRTC peer connection setup and event handlers
 
 // ICE server config (public STUN for demo)
-export const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
+export const ICE_SERVERS = [
+    { urls: "stun:stun.l.google.com:19302" },
+    // { urls: "stun:stun1.l.google.com:19302" },
+    // { urls: "stun:stun2.l.google.com:19302" },
+    // { urls: "stun:stun3.l.google.com:19302" },
+    // { urls: "stun:stun4.l.google.com:19302" },
+    // { urls: "stun:stun.nextcloud.com:3478" },
+];
 
 // Sender and receiver peer connection and data channel references
 export let senderPeerConnection = null;
@@ -26,7 +33,10 @@ function logDebug(msg) {
 }
 
 // Setup sender peer connection and events
-import { setupSenderDataChannelEvents, setupReceiverDataChannelEvents } from "./dataChannel.js";
+import {
+    setupSenderDataChannelEvents,
+    setupReceiverDataChannelEvents,
+} from "./dataChannel.js";
 
 export function setupSenderPeerEvents() {
     senderPeerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
