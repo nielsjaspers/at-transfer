@@ -349,8 +349,15 @@ function setupSenderDataChannelEvents(dc) {
                     `Sending file: ${Math.round((sent / total) * 100)}%`,
                     "info",
                 );
-            }).then(() => {
-                dc.close();
+            }).then(async () => {
+                // Wait for bufferedAmount to be zero before closing
+                while (dc.bufferedAmount > 0) {
+                    await new Promise(res => setTimeout(res, 20));
+                }
+                // Give the EOF a moment to flush
+                setTimeout(() => {
+                    dc.close();
+                }, 50);
             });
         }
     };
@@ -544,37 +551,10 @@ async function fetchOfferFlow() {
 
 function setupReceiverDataChannelEvents(dc) {
     setStatus("receiveStatus", "Data channel open. Receiving...", "info");
-    dc.onmessage = (event) => {
-        if (typeof event.data === "string") {
-            try {
-                const msg = JSON.parse(event.data);
-                if (msg.type === "EOF") {
-                    console.log("Received EOF");
-                    return;
-                }
-            } catch {}
-        } else if (event.data instanceof ArrayBuffer) {
-            receivedFileBuffer.push(event.data);
-            console.log("Received chunk, total:", receivedFileBuffer.length);
-            let receivedBytes = receivedFileBuffer.reduce(
-                (sum, chunk) =>
-                    sum + (chunk instanceof ArrayBuffer ? chunk.byteLength : 0),
-                0,
-            );
-            setStatus(
-                "receiveStatus",
-                `Received ${Math.round(receivedBytes / 1024)} KB`,
-                "info",
-            );
-        }
-    };
-    dc.onclose = () => {
-        setStatus(
-            "receiveStatus",
-            "Data channel closed. Assembling file...",
-            "info",
-        );
-        console.log("Buffer length on close:", receivedFileBuffer.length);
+    let transferTimeout = null;
+    let eofReceived = false;
+
+    function cleanupAndAssemble() {
         if (receivedFileBuffer.length > 0) {
             const url = assembleFile(
                 receivedFileBuffer,
@@ -598,21 +578,71 @@ function setupReceiverDataChannelEvents(dc) {
                     collection: "app.at-transfer.signalanswer",
                     rkey: currentSessionRkey,
                 });
-                setStatus(
-                    "receiveStatus",
-                    "Answer record deleted after file received.",
-                    "info",
-                );
+                setStatus("receiveStatus", "Answer record deleted after file received.", "info");
             } catch (e) {
-                setStatus(
-                    "receiveStatus",
-                    "Failed to delete answer record: " + e.message,
-                    "warning",
-                );
+                setStatus("receiveStatus", "Failed to delete answer record: " + e.message, "warning");
             }
         } else {
             setStatus("receiveStatus", "No data received.", "error");
         }
+        if (transferTimeout) clearTimeout(transferTimeout);
+    }
+
+    function startTimeout() {
+        if (transferTimeout) clearTimeout(transferTimeout);
+        transferTimeout = setTimeout(() => {
+            setStatus("receiveStatus", "Transfer timed out. Cleaning up.", "error");
+            cleanupAndAssemble();
+            if (dc.readyState === "open" || dc.readyState === "connecting") {
+                dc.close();
+            }
+        }, 20000); // 20 seconds timeout after last chunk/EOF
+    }
+
+    startTimeout();
+
+    dc.onmessage = (event) => {
+        startTimeout();
+        if (typeof event.data === "string") {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === "EOF") {
+                    console.log("Received EOF");
+                    eofReceived = true;
+                    cleanupAndAssemble();
+                    if (dc.readyState === "open" || dc.readyState === "connecting") {
+                        dc.close();
+                    }
+                    return;
+                }
+            } catch {}
+        } else if (event.data instanceof ArrayBuffer) {
+            receivedFileBuffer.push(event.data);
+            console.log("Received chunk, total:", receivedFileBuffer.length);
+            let receivedBytes = receivedFileBuffer.reduce(
+                (sum, chunk) =>
+                    sum + (chunk instanceof ArrayBuffer ? chunk.byteLength : 0),
+                0,
+            );
+            setStatus(
+                "receiveStatus",
+                `Received ${Math.round(receivedBytes / 1024)} KB`,
+                "info",
+            );
+        }
+    };
+    dc.onclose = () => {
+        if (!eofReceived) {
+            setStatus(
+                "receiveStatus",
+                "Data channel closed. Assembling file (EOF not seen, may be incomplete)...",
+                "warning",
+            );
+            cleanupAndAssemble();
+        } else {
+            setStatus("receiveStatus", "Data channel closed.", "info");
+        }
+        if (transferTimeout) clearTimeout(transferTimeout);
     };
     dc.onerror = (error) =>
         setStatus("receiveStatus", `DC Error: ${error}`, "error");
