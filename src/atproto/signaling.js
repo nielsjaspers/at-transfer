@@ -97,6 +97,8 @@ export async function postAnswer(
             record: {
                 ...answerObj,
                 intendedSenderDid: senderDid,
+                // Ensure sessionTimestamp is present for schema compliance
+                sessionTimestamp: answerObj.sessionTimestamp,
             },
         });
         setStatus("receiverStatus", "Answer posted", "success");

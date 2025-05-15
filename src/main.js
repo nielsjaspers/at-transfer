@@ -327,7 +327,7 @@ async function pollForAnswer(receiverDid, offerSessionTimestamp, sessionRkey) {
         if (record?.data?.value) {
             const answerRecord = record.data.value;
             if (
-                answerRecord.offerSessionTimestamp === offerSessionTimestamp &&
+                answerRecord.sessionTimestamp === offerSessionTimestamp &&
                 answerRecord.intendedSenderDid === agent.did
             ) {
                 setStatus("sendStatus", "Answer found. Applying...", "success");
@@ -337,6 +337,17 @@ async function pollForAnswer(receiverDid, offerSessionTimestamp, sessionRkey) {
                         sdp: answerRecord.sdp,
                     }),
                 );
+                // Cleanup: delete offer record after answer is received
+                try {
+                    await agent.com.atproto.repo.deleteRecord({
+                        repo: agent.session.did,
+                        collection: "app.at-transfer.signaloffer",
+                        rkey: sessionRkey,
+                    });
+                    setStatus("sendStatus", "Offer record deleted after answer.", "info");
+                } catch (e) {
+                    setStatus("sendStatus", "Failed to delete offer record: " + e.message, "warning");
+                }
                 return;
             }
         }
@@ -426,7 +437,7 @@ async function fetchOfferFlow() {
                         $type: "app.at-transfer.signalanswer",
                         createdAt: new Date().toISOString(),
                         sdp: answerSdp.sdp,
-                        offerSessionTimestamp: offerRecord.sessionTimestamp,
+                        sessionTimestamp: offerRecord.sessionTimestamp,
                         intendedSenderDid: resolvedSenderDid,
                     },
                 });
@@ -511,6 +522,17 @@ function setupReceiverDataChannelEvents(dc) {
                 "File received and assembled! Download link should be visible.",
                 "success",
             );
+            // Cleanup: delete answer record after file is received
+            try {
+                agent.com.atproto.repo.deleteRecord({
+                    repo: agent.session.did,
+                    collection: "app.at-transfer.signalanswer",
+                    rkey: currentSessionRkey,
+                });
+                setStatus("receiveStatus", "Answer record deleted after file received.", "info");
+            } catch (e) {
+                setStatus("receiveStatus", "Failed to delete answer record: " + e.message, "warning");
+            }
         } else {
             setStatus("receiveStatus", "No data received.", "error");
         }
