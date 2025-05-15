@@ -39,6 +39,11 @@ input[type="text"], input[type="password"] {
 
 input[type="file"] {
   margin-bottom: 12px;
+  max-width: 100%;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 button {

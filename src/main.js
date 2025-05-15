@@ -48,10 +48,16 @@ function renderLoginScreen() {
     </div>
   `;
     document.getElementById("loginBtn").onclick = async () => {
-        const handleOrDid = document.getElementById("loginHandleInput").value.trim();
+        const handleOrDid = document
+            .getElementById("loginHandleInput")
+            .value.trim();
         const password = document.getElementById("loginPasswordInput").value;
         if (!handleOrDid || !password) {
-            setStatus("loginStatus", "Please enter your handle and app password.", "error");
+            setStatus(
+                "loginStatus",
+                "Please enter your handle and app password.",
+                "error",
+            );
             return;
         }
         setStatus("loginStatus", "Logging in...", "info");
@@ -167,7 +173,8 @@ function clearSession() {
 
 async function tryRestoreSession() {
     const sessionStr = localStorage.getItem(SESSION_KEY);
-    const serviceUrl = localStorage.getItem(SERVICE_KEY) || "https://bsky.social";
+    const serviceUrl =
+        localStorage.getItem(SERVICE_KEY) || "https://bsky.social";
     if (!sessionStr) return false;
     try {
         const sess = JSON.parse(sessionStr);
@@ -227,7 +234,10 @@ async function sendOfferFlow() {
 
                 // Use postOffer from signaling.js
                 // resolvedReceiverDid is from the outer scope of sendOfferFlow
-                const { resolvedReceiverDid: actualPostedReceiverDid, sessionRkey } = await postOffer(
+                const {
+                    resolvedReceiverDid: actualPostedReceiverDid,
+                    sessionRkey,
+                } = await postOffer(
                     agent,
                     resolvedReceiverDid,
                     offerDetails,
@@ -237,13 +247,14 @@ async function sendOfferFlow() {
                 if (actualPostedReceiverDid && sessionRkey) {
                     setStatus(
                         "sendStatus",
-                        `Offer posted. Session key (rkey): ${sessionRkey} (copy this to the receiver)`,
+                        "Offer posted. Waiting for answer...",
                         "info",
                     );
                     // Display the session key for easy copy/paste
                     const sendPanel = document.getElementById("sendPanel");
                     if (sendPanel) {
-                        let rkeyElem = document.getElementById("sessionRkeyDisplay");
+                        let rkeyElem =
+                            document.getElementById("sessionRkeyDisplay");
                         if (!rkeyElem) {
                             rkeyElem = document.createElement("div");
                             rkeyElem.id = "sessionRkeyDisplay";
@@ -260,19 +271,26 @@ async function sendOfferFlow() {
                             </span>
                         `;
                         const copyBtn = document.getElementById("copyRkeyBtn");
-                        const codeElem = document.getElementById("sessionRkeyCode");
-                        const statusElem = document.getElementById("copyRkeyStatus");
+                        const codeElem =
+                            document.getElementById("sessionRkeyCode");
+                        const statusElem =
+                            document.getElementById("copyRkeyStatus");
                         if (copyBtn && codeElem) {
                             copyBtn.onclick = async () => {
                                 try {
-                                    await navigator.clipboard.writeText(sessionRkey);
+                                    await navigator.clipboard.writeText(
+                                        sessionRkey,
+                                    );
                                     if (statusElem) {
                                         statusElem.style.display = "inline";
-                                        setTimeout(() => { statusElem.style.display = "none"; }, 1200);
+                                        setTimeout(() => {
+                                            statusElem.style.display = "none";
+                                        }, 1200);
                                     }
                                 } catch (e) {
                                     if (statusElem) {
-                                        statusElem.textContent = "Failed to copy";
+                                        statusElem.textContent =
+                                            "Failed to copy";
                                         statusElem.style.color = "#d32f2f";
                                         statusElem.style.display = "inline";
                                         setTimeout(() => {
@@ -336,7 +354,12 @@ function setupSenderDataChannelEvents(dc) {
             });
         }
     };
-    dc.onclose = () => setStatus("sendStatus", "Data channel closed.", "info");
+    dc.onclose = () => {
+        setStatus("sendStatus", "Data channel closed.", "info");
+        // Remove session key display when transfer is done
+        const rkeyElem = document.getElementById("sessionRkeyDisplay");
+        if (rkeyElem) rkeyElem.remove();
+    };
     dc.onerror = (error) =>
         setStatus("sendStatus", `DC Error: ${error}`, "error");
 }
@@ -373,15 +396,26 @@ async function pollForAnswer(receiverDid, offerSessionTimestamp, sessionRkey) {
                         collection: "app.at-transfer.signaloffer",
                         rkey: sessionRkey,
                     });
-                    setStatus("sendStatus", "Offer record deleted after answer.", "info");
+                    setStatus(
+                        "sendStatus",
+                        "Offer record deleted after answer.",
+                        "info",
+                    );
                 } catch (e) {
-                    setStatus("sendStatus", "Failed to delete offer record: " + e.message, "warning");
+                    setStatus(
+                        "sendStatus",
+                        "Failed to delete offer record: " + e.message,
+                        "warning",
+                    );
                 }
                 return;
             }
         }
     } catch (e) {}
-    setTimeout(() => pollForAnswer(receiverDid, offerSessionTimestamp, sessionRkey), 5000);
+    setTimeout(
+        () => pollForAnswer(receiverDid, offerSessionTimestamp, sessionRkey),
+        5000,
+    );
 }
 
 // ---- RECEIVE FLOW ----
@@ -402,9 +436,15 @@ async function fetchOfferFlow() {
     document.getElementById("receivedFileLink").style.display = "none";
 
     // Prompt user for session key (rkey) or generate from offer sessionTimestamp
-    let sessionRkey = prompt("Enter session key (rkey) for this transfer (ask sender):");
+    let sessionRkey = prompt(
+        "Enter session key (rkey) for this transfer (ask sender):",
+    );
     if (!sessionRkey) {
-        setStatus("receiveStatus", "Session key (rkey) is required to fetch offer.", "error");
+        setStatus(
+            "receiveStatus",
+            "Session key (rkey) is required to fetch offer.",
+            "error",
+        );
         return;
     }
     currentSessionRkey = sessionRkey;
@@ -558,9 +598,17 @@ function setupReceiverDataChannelEvents(dc) {
                     collection: "app.at-transfer.signalanswer",
                     rkey: currentSessionRkey,
                 });
-                setStatus("receiveStatus", "Answer record deleted after file received.", "info");
+                setStatus(
+                    "receiveStatus",
+                    "Answer record deleted after file received.",
+                    "info",
+                );
             } catch (e) {
-                setStatus("receiveStatus", "Failed to delete answer record: " + e.message, "warning");
+                setStatus(
+                    "receiveStatus",
+                    "Failed to delete answer record: " + e.message,
+                    "warning",
+                );
             }
         } else {
             setStatus("receiveStatus", "No data received.", "error");
