@@ -124,40 +124,31 @@ function showSendPanel() {
         document.getElementById("rolePanel").innerHTML = "";
     };
     document.getElementById("showConnectionsBtnSend").onclick = () => {
-        showConnectionsModal(getKnownConnections(), {
-            onSelect: ({ did, handle }) => {
+        showConnectionsModalWithHandlers(
+            getKnownConnections(),
+            ({ did, handle }) => {
                 const input = document.getElementById("sendReceiverInput");
                 if (input) input.value = handle || did;
-            },
-            onRemove: onRemoveConnectionSend,
-            onRemoveAll: onRemoveAllConnectionsSend,
-            onClose: () => {},
-        });
-        function onRemoveConnectionSend(did) {
-            removeKnownConnection(did);
-            showConnectionsModal(getKnownConnections(), {
-                onSelect: ({ did, handle }) => {
-                    const input = document.getElementById("sendReceiverInput");
-                    if (input) input.value = handle || did;
-                },
-                onRemove: onRemoveConnectionSend,
-                onRemoveAll: onRemoveAllConnectionsSend,
-                onClose: () => {},
-            });
-        }
-        function onRemoveAllConnectionsSend() {
-            removeAllKnownConnections();
-            showConnectionsModal(getKnownConnections(), {
-                onSelect: ({ did, handle }) => {
-                    const input = document.getElementById("sendReceiverInput");
-                    if (input) input.value = handle || did;
-                },
-                onRemove: onRemoveConnectionSend,
-                onRemoveAll: onRemoveAllConnectionsSend,
-                onClose: () => {},
-            });
-        }
+            }
+        );
     };
+
+function showConnectionsModalWithHandlers(connections, onSelect) {
+    const onRemove = (did) => {
+        removeKnownConnection(did);
+        showConnectionsModalWithHandlers(getKnownConnections(), onSelect);
+    };
+    const onRemoveAll = () => {
+        removeAllKnownConnections();
+        showConnectionsModalWithHandlers(getKnownConnections(), onSelect);
+    };
+    showConnectionsModal(connections, {
+        onSelect,
+        onRemove,
+        onRemoveAll,
+        onClose: () => {},
+    });
+}
 }
 
 function showReceivePanel() {
