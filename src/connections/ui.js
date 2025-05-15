@@ -67,7 +67,17 @@ export function showConnectionsModal(connections, { onSelect, onRemove, onRemove
             info.style.flex = "1";
             info.style.cursor = "pointer";
             info.title = conn.did;
-            info.innerHTML = `<b>${conn.handle}</b><br><span style="font-size:0.93em;color:#888;">${conn.did}</span>`;
+            const handleElement = document.createElement("b");
+            handleElement.textContent = conn.handle;
+
+            const didElement = document.createElement("span");
+            didElement.style.fontSize = "0.93em";
+            didElement.style.color = "#888";
+            didElement.textContent = conn.did;
+
+            info.appendChild(handleElement);
+            info.appendChild(document.createElement("br"));
+            info.appendChild(didElement);
             info.onclick = () => {
                 onSelect(conn);
                 closeModal();
