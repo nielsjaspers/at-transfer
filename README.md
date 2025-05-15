@@ -14,15 +14,23 @@ at-transfer is a peer-to-peer file sharing service on top of the [AT Protocol](h
 
 ## Features
 - Peer-to-peer file sharing using the decentralized [AT Protocol](https://atproto.com).
-- Direct and secure file transfer.
+- Direct, secure, and decentralized file transfer.
 
 ## Roadmap
 - **Short-Term Goals**
     - Enhance documentation and provide clear setup instructions.
     - Implement a user-friendly interface for seamless file sharing.
+    - Better Mobile-Friendly UI.
+    - Status Bar for file transfer progress.
+    - Dark Mode.
 
 ### Long Term
-- Achieve full feature-completion with robust security measures.
+- Multi-File Transfer.
+- Transfer Resume/Retry.
+- Custom ICE Servers.
+- Extra end-to-end encryption for file contents (passphrases).
+- Session Key QR Codes.
+- Assign Nicknames to Known Conncection.
 - Implementing AT Proto OAuth for better session management.
 
 ## Getting Started
