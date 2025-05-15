@@ -9,6 +9,8 @@ import {
 import { resolveHandleToDid, getPdsEndpointForDid } from "./atproto/did.js";
 import { sendFileInChunks, assembleFile } from "./webrtc/fileTransfer.js";
 import { ICE_SERVERS } from "./webrtc/peer.js";
+import { getKnownConnections, addKnownConnection, removeKnownConnection, removeAllKnownConnections } from "./connections/storage.js";
+import { showConnectionsModal } from "./connections/ui.js";
 
 // ---- STATE ----
 let agent = null;
@@ -76,9 +78,9 @@ function renderDashboard() {
       <h2>Welcome, ${userHandle || userDid}</h2>
       <p>What do you want to do?</p>
       <div style="display:flex;gap:18px;margin:18px 0;">
-        <button id="chooseSendBtn">Send File</button>
-        <button id="chooseReceiveBtn">Receive File</button>
-      </div>
+          <button id="chooseSendBtn">Send File</button>
+          <button id="chooseReceiveBtn">Receive File</button>
+        </div>
       <button id="logoutBtn" style="margin-top:12px;background:#d32f2f;">Log out</button>
     </div>
     <div id="rolePanel"></div>
@@ -90,6 +92,7 @@ function renderDashboard() {
         clearSession();
         window.location.reload();
     };
+
 }
 
 function showSendPanel() {
@@ -97,7 +100,10 @@ function showSendPanel() {
     const rolePanel = document.getElementById("rolePanel");
     rolePanel.innerHTML = `
     <div class="panel" id="sendPanel">
-      <h2>Send File</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <h2 style="margin-bottom:0;">Send File</h2>
+        <button id="showConnectionsBtnSend" style="background:#888;margin-left:16px;">Known Connections</button>
+      </div>
       <label for="sendReceiverInput">Receiver DID or Handle</label>
       <input id="sendReceiverInput" type="text" placeholder="did:plc:... or handle.bsky.social" autocomplete="off" />
       <label for="sendFileInput">File to Send</label>
@@ -117,6 +123,32 @@ function showSendPanel() {
     document.getElementById("backToDashboardFromSend").onclick = () => {
         document.getElementById("rolePanel").innerHTML = "";
     };
+    document.getElementById("showConnectionsBtnSend").onclick = () => {
+        showConnectionsModalWithHandlers(
+            getKnownConnections(),
+            ({ did, handle }) => {
+                const input = document.getElementById("sendReceiverInput");
+                if (input) input.value = handle || did;
+            }
+        );
+    };
+
+function showConnectionsModalWithHandlers(connections, onSelect) {
+    const onRemove = (did) => {
+        removeKnownConnection(did);
+        showConnectionsModalWithHandlers(getKnownConnections(), onSelect);
+    };
+    const onRemoveAll = () => {
+        removeAllKnownConnections();
+        showConnectionsModalWithHandlers(getKnownConnections(), onSelect);
+    };
+    showConnectionsModal(connections, {
+        onSelect,
+        onRemove,
+        onRemoveAll,
+        onClose: () => {},
+    });
+}
 }
 
 function showReceivePanel() {
@@ -124,7 +156,10 @@ function showReceivePanel() {
     const rolePanel = document.getElementById("rolePanel");
     rolePanel.innerHTML = `
     <div class="panel" id="receivePanel">
-      <h2>Receive File</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <h2 style="margin-bottom:0;">Receive File</h2>
+        <button id="showConnectionsBtnReceive" style="background:#888;margin-left:16px;">Known Connections</button>
+      </div>
       <label for="receiveSenderInput">Sender DID or Handle</label>
       <input id="receiveSenderInput" type="text" placeholder="did:plc:... or handle.bsky.social" autocomplete="off" />
       <button id="fetchOfferBtn">Fetch Offer</button>
@@ -136,6 +171,41 @@ function showReceivePanel() {
     document.getElementById("fetchOfferBtn").onclick = fetchOfferFlow;
     document.getElementById("backToDashboardFromReceive").onclick = () => {
         document.getElementById("rolePanel").innerHTML = "";
+    };
+    document.getElementById("showConnectionsBtnReceive").onclick = () => {
+        showConnectionsModal(getKnownConnections(), {
+            onSelect: ({ did, handle }) => {
+                const input = document.getElementById("receiveSenderInput");
+                if (input) input.value = handle || did;
+            },
+            onRemove: onRemoveConnectionReceive,
+            onRemoveAll: onRemoveAllConnectionsReceive,
+            onClose: () => {},
+        });
+        function onRemoveConnectionReceive(did) {
+            removeKnownConnection(did);
+            showConnectionsModal(getKnownConnections(), {
+                onSelect: ({ did, handle }) => {
+                    const input = document.getElementById("receiveSenderInput");
+                    if (input) input.value = handle || did;
+                },
+                onRemove: onRemoveConnectionReceive,
+                onRemoveAll: onRemoveAllConnectionsReceive,
+                onClose: () => {},
+            });
+        }
+        function onRemoveAllConnectionsReceive() {
+            removeAllKnownConnections();
+            showConnectionsModal(getKnownConnections(), {
+                onSelect: ({ did, handle }) => {
+                    const input = document.getElementById("receiveSenderInput");
+                    if (input) input.value = handle || did;
+                },
+                onRemove: onRemoveConnectionReceive,
+                onRemoveAll: onRemoveAllConnectionsReceive,
+                onClose: () => {},
+            });
+        }
     };
 }
 
@@ -212,6 +282,9 @@ async function sendOfferFlow() {
             receiverInput,
             agent,
         );
+        // Save known connection (receiver)
+        addKnownConnection({ did: resolvedReceiverDid, handle: receiverInput });
+
         peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
         dataChannel = peerConnection.createDataChannel("fileTransferChannel");
         dataChannel.binaryType = "arraybuffer";
@@ -458,6 +531,9 @@ async function fetchOfferFlow() {
 
     try {
         const resolvedSenderDid = await resolveHandleToDid(senderInput, agent);
+        // Save known connection (sender)
+        addKnownConnection({ did: resolvedSenderDid, handle: senderInput });
+
         const senderPdsUrl = await getPdsEndpointForDid(resolvedSenderDid);
         const { AtpAgent } = await import("@atproto/api");
         const tempAgent = new AtpAgent({ service: senderPdsUrl });
