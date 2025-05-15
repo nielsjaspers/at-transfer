@@ -30,7 +30,7 @@ at-transfer is a peer-to-peer file sharing service on top of the [AT Protocol](h
 - Custom ICE Servers.
 - Extra end-to-end encryption for file contents (passphrases).
 - Session Key QR Codes.
-- Assign Nicknames to Known Conncection.
+- Assign Nicknames to Known Connection.
 - Implementing AT Proto OAuth for better session management.
 
 ## Getting Started
