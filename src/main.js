@@ -20,6 +20,7 @@ let peerConnection = null;
 let dataChannel = null;
 let fileToSend = null;
 let currentOfferSessionTimestamp = null;
+let currentSessionRkey = null;
 let receivedFileBuffer = [];
 let receivedFileName = "received_file";
 let receivedFileType = "application/octet-stream";
@@ -197,6 +198,7 @@ async function sendOfferFlow() {
     }
     setStatus("sendStatus", "Preparing offer...", "info");
     currentOfferSessionTimestamp = new Date().toISOString();
+    currentSessionRkey = crypto.randomUUID();
 
     try {
         const resolvedReceiverDid = await resolveHandleToDid(
@@ -225,21 +227,39 @@ async function sendOfferFlow() {
 
                 // Use postOffer from signaling.js
                 // resolvedReceiverDid is from the outer scope of sendOfferFlow
-                const actualPostedReceiverDid = await postOffer(
+                const { resolvedReceiverDid: actualPostedReceiverDid, sessionRkey } = await postOffer(
                     agent,
                     resolvedReceiverDid,
                     offerDetails,
+                    currentSessionRkey,
                 );
 
-                if (actualPostedReceiverDid) {
+                if (actualPostedReceiverDid && sessionRkey) {
                     setStatus(
                         "sendStatus",
-                        "Offer posted. Waiting for answer...",
+                        `Offer posted. Session key (rkey): ${sessionRkey} (copy this to the receiver)`,
                         "info",
                     );
+                    // Display the session key for easy copy/paste
+                    const sendPanel = document.getElementById("sendPanel");
+                    if (sendPanel) {
+                        let rkeyElem = document.getElementById("sessionRkeyDisplay");
+                        if (!rkeyElem) {
+                            rkeyElem = document.createElement("div");
+                            rkeyElem.id = "sessionRkeyDisplay";
+                            rkeyElem.style.margin = "12px 0";
+                            rkeyElem.style.fontSize = "1.1em";
+                            sendPanel.appendChild(rkeyElem);
+                        }
+                        rkeyElem.innerHTML = `<b>Session key (rkey):</b> <code>${sessionRkey}</code> <button id="copyRkeyBtn">Copy</button>`;
+                        document.getElementById("copyRkeyBtn").onclick = () => {
+                            navigator.clipboard.writeText(sessionRkey);
+                        };
+                    }
                     pollForAnswer(
                         actualPostedReceiverDid, // Use the DID returned by postOffer
                         currentOfferSessionTimestamp,
+                        sessionRkey,
                     );
                 } else {
                     setStatus(
@@ -292,7 +312,7 @@ function setupSenderDataChannelEvents(dc) {
         setStatus("sendStatus", `DC Error: ${error}`, "error");
 }
 
-async function pollForAnswer(receiverDid, offerSessionTimestamp) {
+async function pollForAnswer(receiverDid, offerSessionTimestamp, sessionRkey) {
     try {
         const receiverPdsUrl = await getPdsEndpointForDid(receiverDid);
         const { AtpAgent } = await import("@atproto/api");
@@ -301,7 +321,7 @@ async function pollForAnswer(receiverDid, offerSessionTimestamp) {
         const record = await tempAgent.com.atproto.repo.getRecord({
             repo: receiverDid,
             collection: "app.at-transfer.signalanswer",
-            rkey: "self",
+            rkey: sessionRkey,
         });
 
         if (record?.data?.value) {
@@ -321,7 +341,7 @@ async function pollForAnswer(receiverDid, offerSessionTimestamp) {
             }
         }
     } catch (e) {}
-    setTimeout(() => pollForAnswer(receiverDid, offerSessionTimestamp), 1000);
+    setTimeout(() => pollForAnswer(receiverDid, offerSessionTimestamp, sessionRkey), 5000);
 }
 
 // ---- RECEIVE FLOW ----
@@ -341,6 +361,14 @@ async function fetchOfferFlow() {
     receivedFileBuffer = [];
     document.getElementById("receivedFileLink").style.display = "none";
 
+    // Prompt user for session key (rkey) or generate from offer sessionTimestamp
+    let sessionRkey = prompt("Enter session key (rkey) for this transfer (ask sender):");
+    if (!sessionRkey) {
+        setStatus("receiveStatus", "Session key (rkey) is required to fetch offer.", "error");
+        return;
+    }
+    currentSessionRkey = sessionRkey;
+
     try {
         const resolvedSenderDid = await resolveHandleToDid(senderInput, agent);
         const senderPdsUrl = await getPdsEndpointForDid(resolvedSenderDid);
@@ -350,7 +378,7 @@ async function fetchOfferFlow() {
         const record = await tempAgent.com.atproto.repo.getRecord({
             repo: resolvedSenderDid,
             collection: "app.at-transfer.signaloffer",
-            rkey: "self",
+            rkey: sessionRkey,
         });
 
         if (!record?.data?.value) {
@@ -393,7 +421,7 @@ async function fetchOfferFlow() {
                 await agent.com.atproto.repo.putRecord({
                     repo: agent.session.did,
                     collection: "app.at-transfer.signalanswer",
-                    rkey: "self",
+                    rkey: sessionRkey,
                     record: {
                         $type: "app.at-transfer.signalanswer",
                         createdAt: new Date().toISOString(),
@@ -490,6 +518,9 @@ function setupReceiverDataChannelEvents(dc) {
     dc.onerror = (error) =>
         setStatus("receiveStatus", `DC Error: ${error}`, "error");
 }
+
+// ---- Utility: Generate random session rkey ----
+/* No longer needed: replaced by crypto.randomUUID() */
 
 // ---- APP INIT ----
 document.addEventListener("DOMContentLoaded", async () => {

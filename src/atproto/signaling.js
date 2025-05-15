@@ -7,27 +7,38 @@ import { setStatus } from "../ui/status.js";
 
 const OFFER_COLLECTION = "app.at-transfer.signaloffer";
 const ANSWER_COLLECTION = "app.at-transfer.signalanswer";
-const RECORD_RKEY = "self"; // PoC uses 'self'
 
-export async function postOffer(senderAgent, receiverIdentifier, offerObj) {
+/**
+ * Post an offer to the sender's repo using a random session rkey.
+ * Returns { resolvedReceiverDid, sessionRkey }
+ */
+export async function postOffer(
+    senderAgent,
+    receiverIdentifier,
+    offerObj,
+    sessionRkey,
+) {
     try {
         // Resolve receiver DID using senderAgent
-        const resolvedReceiverDid = await resolveHandleToDid(receiverIdentifier, senderAgent);
+        const resolvedReceiverDid = await resolveHandleToDid(
+            receiverIdentifier,
+            senderAgent,
+        );
         console.log(`[Sender] Target Receiver DID: ${resolvedReceiverDid}`);
 
-        // Post offer to sender's own repo (PoC style)
+        // Post offer to sender's own repo using sessionRkey
         await senderAgent.com.atproto.repo.putRecord({
             repo: senderAgent.did,
             collection: OFFER_COLLECTION,
-            rkey: RECORD_RKEY,
+            rkey: sessionRkey,
             record: {
                 ...offerObj,
-                intendedReceiverDid: resolvedReceiverDid
+                intendedReceiverDid: resolvedReceiverDid,
             },
         });
         setStatus("senderStatus", "Offer posted", "success");
         console.log("[Sender] Offer posted successfully");
-        return resolvedReceiverDid;
+        return { resolvedReceiverDid, sessionRkey };
     } catch (err) {
         setStatus("senderStatus", "Failed to post offer", "error");
         console.log(`[Sender] Error posting offer: ${err.message}`);
@@ -35,21 +46,28 @@ export async function postOffer(senderAgent, receiverIdentifier, offerObj) {
     }
 }
 
-export async function fetchOffer(receiverAgent, senderIdentifier) {
+/**
+ * Fetch an offer from the sender's repo using the session rkey.
+ * Returns { offer, resolvedSenderDid }
+ */
+export async function fetchOffer(receiverAgent, senderIdentifier, sessionRkey) {
     try {
         // Resolve sender DID using receiverAgent
-        const resolvedSenderDid = await resolveHandleToDid(senderIdentifier, receiverAgent);
+        const resolvedSenderDid = await resolveHandleToDid(
+            senderIdentifier,
+            receiverAgent,
+        );
         console.log(`[Receiver] Target Sender DID: ${resolvedSenderDid}`);
 
         // Discover sender's PDS endpoint
         const senderPdsUrl = await getPdsEndpointForDid(resolvedSenderDid);
         const tempAgent = new AtpAgent({ service: senderPdsUrl });
 
-        // Fetch offer from sender's repo
+        // Fetch offer from sender's repo using sessionRkey
         const record = await tempAgent.com.atproto.repo.getRecord({
             repo: resolvedSenderDid,
             collection: OFFER_COLLECTION,
-            rkey: RECORD_RKEY,
+            rkey: sessionRkey,
         });
 
         console.log("[Receiver] Fetched offer record");
@@ -61,16 +79,24 @@ export async function fetchOffer(receiverAgent, senderIdentifier) {
     }
 }
 
-export async function postAnswer(receiverAgent, senderDid, answerObj) {
+/**
+ * Post an answer to the receiver's repo using the session rkey.
+ */
+export async function postAnswer(
+    receiverAgent,
+    senderDid,
+    answerObj,
+    sessionRkey,
+) {
     try {
-        // Post answer to receiver's own repo (PoC style)
+        // Post answer to receiver's own repo using sessionRkey
         await receiverAgent.com.atproto.repo.putRecord({
             repo: receiverAgent.did,
             collection: ANSWER_COLLECTION,
-            rkey: RECORD_RKEY,
+            rkey: sessionRkey,
             record: {
                 ...answerObj,
-                intendedSenderDid: senderDid
+                intendedSenderDid: senderDid,
             },
         });
         setStatus("receiverStatus", "Answer posted", "success");
@@ -82,17 +108,20 @@ export async function postAnswer(receiverAgent, senderDid, answerObj) {
     }
 }
 
-export async function fetchAnswer(senderAgent, receiverDid) {
+/**
+ * Fetch an answer from the receiver's repo using the session rkey.
+ */
+export async function fetchAnswer(senderAgent, receiverDid, sessionRkey) {
     try {
         // Discover receiver's PDS endpoint
         const receiverPdsUrl = await getPdsEndpointForDid(receiverDid);
         const tempAgent = new AtpAgent({ service: receiverPdsUrl });
 
-        // Fetch answer from receiver's repo
+        // Fetch answer from receiver's repo using sessionRkey
         const record = await tempAgent.com.atproto.repo.getRecord({
             repo: receiverDid,
             collection: ANSWER_COLLECTION,
-            rkey: RECORD_RKEY,
+            rkey: sessionRkey,
         });
 
         console.log("[Sender] Fetched answer record");
