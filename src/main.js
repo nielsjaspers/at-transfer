@@ -251,10 +251,39 @@ async function sendOfferFlow() {
                             rkeyElem.style.fontSize = "1.1em";
                             sendPanel.appendChild(rkeyElem);
                         }
-                        rkeyElem.innerHTML = `<b>Session key (rkey):</b> <code>${sessionRkey}</code> <button id="copyRkeyBtn">Copy</button>`;
-                        document.getElementById("copyRkeyBtn").onclick = () => {
-                            navigator.clipboard.writeText(sessionRkey);
-                        };
+                        rkeyElem.innerHTML = `
+                            <b>Session key (rkey):</b>
+                            <span style="display:inline-flex;align-items:center;gap:8px;">
+                                <code id="sessionRkeyCode" style="font-size:1.05em;padding:2px 6px;background:#f4f4f4;border-radius:4px;">${sessionRkey}</code>
+                                <button id="copyRkeyBtn" type="button" aria-label="Copy session key" style="padding:2px 8px;font-size:0.95em;cursor:pointer;">Copy</button>
+                                <span id="copyRkeyStatus" style="font-size:0.95em;color:#1a9c3c;display:none;">Copied!</span>
+                            </span>
+                        `;
+                        const copyBtn = document.getElementById("copyRkeyBtn");
+                        const codeElem = document.getElementById("sessionRkeyCode");
+                        const statusElem = document.getElementById("copyRkeyStatus");
+                        if (copyBtn && codeElem) {
+                            copyBtn.onclick = async () => {
+                                try {
+                                    await navigator.clipboard.writeText(sessionRkey);
+                                    if (statusElem) {
+                                        statusElem.style.display = "inline";
+                                        setTimeout(() => { statusElem.style.display = "none"; }, 1200);
+                                    }
+                                } catch (e) {
+                                    if (statusElem) {
+                                        statusElem.textContent = "Failed to copy";
+                                        statusElem.style.color = "#d32f2f";
+                                        statusElem.style.display = "inline";
+                                        setTimeout(() => {
+                                            statusElem.style.display = "none";
+                                            statusElem.textContent = "Copied!";
+                                            statusElem.style.color = "#1a9c3c";
+                                        }, 1200);
+                                    }
+                                }
+                            };
+                        }
                     }
                     pollForAnswer(
                         actualPostedReceiverDid, // Use the DID returned by postOffer
