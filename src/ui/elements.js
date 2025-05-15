@@ -1,113 +1,97 @@
 // UI element references and setup for AT-Transfer
 
 export const elements = {
-    // Sender panel
-    senderPdsUrlInput: null,
-    senderLoginIdInput: null,
-    senderPasswordInput: null,
-    senderLoginButton: null,
-    senderLoginStatus: null,
-    senderDidInput: null,
-    fileInput: null,
+    // Login
+    loginHandleInput: null,
+    oauthLoginButton: null,
+    loginStatus: null,
+
+    // Dashboard
+    dashboardScreen: null,
+    userInfo: null,
+    chooseSend: null,
+    chooseReceive: null,
+    logoutButton: null,
+
+    // Send panel
+    sendPanel: null,
+    sendReceiverDidInput: null,
+    sendFileInput: null,
     sendOfferButton: null,
-    senderStatus: null,
+    sendStatus: null,
+    backToDashboardFromSend: null,
 
-    // Receiver panel
-    receiverPdsUrlInput: null,
-    receiverLoginIdInput: null,
-    receiverPasswordInput: null,
-    receiverLoginButton: null,
-    receiverLoginStatus: null,
-    receiverDidInput: null,
+    // Receive panel
+    receivePanel: null,
+    receiveSenderDidInput: null,
     fetchOfferButton: null,
-    receiverStatus: null,
+    receiveStatus: null,
     receivedFileLink: null,
-
-    // Debug/log
-    debugLogArea: null,
+    backToDashboardFromReceive: null,
 };
 
 export function initUI() {
-    // Create sender panel
-    const senderPanel = document.createElement("div");
-    senderPanel.className = "panel";
-    senderPanel.innerHTML = `
-    <h2>Sender</h2>
-    <label for="senderPdsUrlInput">PDS URL</label>
-    <input id="senderPdsUrlInput" type="text" placeholder="https://bsky.social" value="https://bsky.social" autocomplete="off" />
-    <label for="senderLoginIdInput">Handle or DID</label>
-    <input id="senderLoginIdInput" type="text" placeholder="alice.bsky.social" autocomplete="username" />
-    <label for="senderPasswordInput">App Password</label>
-    <input id="senderPasswordInput" type="password" placeholder="App Password" autocomplete="current-password" />
-    <button id="senderLoginButton">Login</button>
-    <span class="status" id="senderLoginStatus"></span>
-    <label for="senderDidInput">Receiver DID or Handle</label>
-    <input id="senderDidInput" type="text" placeholder="did:plc:... or handle.bsky.social" autocomplete="off" />
-    <label for="fileInput">File to Send</label>
-    <input id="fileInput" type="file" />
-    <button id="sendOfferButton">Send Offer</button>
-    <span class="status" id="senderStatus"></span>
-  `;
-
-    // Create receiver panel
-    const receiverPanel = document.createElement("div");
-    receiverPanel.className = "panel";
-    receiverPanel.innerHTML = `
-    <h2>Receiver</h2>
-    <label for="receiverPdsUrlInput">PDS URL</label>
-    <input id="receiverPdsUrlInput" type="text" placeholder="https://bsky.social" value="https://bsky.social" autocomplete="off" />
-    <label for="receiverLoginIdInput">Handle or DID</label>
-    <input id="receiverLoginIdInput" type="text" placeholder="bob.bsky.social" autocomplete="username" />
-    <label for="receiverPasswordInput">App Password</label>
-    <input id="receiverPasswordInput" type="password" placeholder="App Password" autocomplete="current-password" />
-    <button id="receiverLoginButton">Login</button>
-    <span class="status" id="receiverLoginStatus"></span>
-    <label for="receiverDidInput">Sender DID or Handle</label>
-    <input id="receiverDidInput" type="text" placeholder="did:plc:... or handle.bsky.social" autocomplete="off" />
-    <button id="fetchOfferButton">Fetch Offer</button>
-    <span class="status" id="receiverStatus"></span>
-    <a id="receivedFileLink" href="#" download style="display:none;">Download Received File</a>
-  `;
-
-    // Insert panels into #app
     const appDiv = document.getElementById("app");
-    appDiv.appendChild(senderPanel);
-    appDiv.appendChild(receiverPanel);
+    appDiv.innerHTML = `
+      <div id="loginScreen" class="panel" style="max-width: 400px; margin-top: 48px;">
+        <h2>AT-Transfer</h2>
+        <p>Sign in with your Bluesky account to begin.</p>
+        <button id="oauthLoginButton" style="width:100%;padding:12px 0;font-size:1.1em;background:#2a7cff;color:#fff;border:none;border-radius:4px;margin-top:18px;">Sign in with Bluesky</button>
+        <div id="loginStatus" class="status" style="margin-top:16px;"></div>
+      </div>
+      <div id="dashboardScreen" class="panel" style="display:none;max-width:400px;">
+        <h2>Welcome!</h2>
+        <div id="userInfo" style="margin-bottom:18px;"></div>
+        <p>What do you want to do?</p>
+        <button id="chooseSend" style="margin-right:16px;">Send File</button>
+        <button id="chooseReceive">Receive File</button>
+        <button id="logoutButton" style="float:right;background:#d32f2f;">Log out</button>
+      </div>
+      <div id="sendPanel" class="panel" style="display:none;">
+        <h2>Send File</h2>
+        <label for="sendReceiverDidInput">Receiver DID or Handle</label>
+        <input id="sendReceiverDidInput" type="text" placeholder="did:plc:... or handle.bsky.social" autocomplete="off" />
+        <label for="sendFileInput">File to Send</label>
+        <input id="sendFileInput" type="file" />
+        <button id="sendOfferButton">Send Offer</button>
+        <span class="status" id="sendStatus"></span>
+        <button id="backToDashboardFromSend" style="margin-top:18px;">Back</button>
+      </div>
+      <div id="receivePanel" class="panel" style="display:none;">
+        <h2>Receive File</h2>
+        <label for="receiveSenderDidInput">Sender DID or Handle</label>
+        <input id="receiveSenderDidInput" type="text" placeholder="did:plc:... or handle.bsky.social" autocomplete="off" />
+        <button id="fetchOfferButton">Fetch Offer</button>
+        <span class="status" id="receiveStatus"></span>
+        <a id="receivedFileLink" href="#" download style="display:none;">Download Received File</a>
+        <button id="backToDashboardFromReceive" style="margin-top:18px;">Back</button>
+      </div>
+    `;
 
-    // Debug log area already in HTML, just reference it
-    elements.debugLogArea = document.getElementById("debugLogArea");
+    // Login elements
+    elements.oauthLoginButton = document.getElementById("oauthLoginButton");
+    elements.loginStatus = document.getElementById("loginStatus");
 
-    // Sender elements
-    elements.senderPdsUrlInput = document.getElementById("senderPdsUrlInput");
-    elements.senderLoginIdInput = document.getElementById("senderLoginIdInput");
-    elements.senderPasswordInput = document.getElementById(
-        "senderPasswordInput",
-    );
-    elements.senderLoginButton = document.getElementById("senderLoginButton");
-    elements.senderLoginStatus = document.getElementById("senderLoginStatus");
-    elements.senderDidInput = document.getElementById("senderDidInput");
-    elements.fileInput = document.getElementById("fileInput");
+    // Dashboard elements
+    elements.dashboardScreen = document.getElementById("dashboardScreen");
+    elements.userInfo = document.getElementById("userInfo");
+    elements.chooseSend = document.getElementById("chooseSend");
+    elements.chooseReceive = document.getElementById("chooseReceive");
+    elements.logoutButton = document.getElementById("logoutButton");
+
+    // Send panel elements
+    elements.sendPanel = document.getElementById("sendPanel");
+    elements.sendReceiverDidInput = document.getElementById("sendReceiverDidInput");
+    elements.sendFileInput = document.getElementById("sendFileInput");
     elements.sendOfferButton = document.getElementById("sendOfferButton");
-    elements.senderStatus = document.getElementById("senderStatus");
+    elements.sendStatus = document.getElementById("sendStatus");
+    elements.backToDashboardFromSend = document.getElementById("backToDashboardFromSend");
 
-    // Receiver elements
-    elements.receiverPdsUrlInput = document.getElementById(
-        "receiverPdsUrlInput",
-    );
-    elements.receiverLoginIdInput = document.getElementById(
-        "receiverLoginIdInput",
-    );
-    elements.receiverPasswordInput = document.getElementById(
-        "receiverPasswordInput",
-    );
-    elements.receiverLoginButton = document.getElementById(
-        "receiverLoginButton",
-    );
-    elements.receiverLoginStatus = document.getElementById(
-        "receiverLoginStatus",
-    );
-    elements.receiverDidInput = document.getElementById("receiverDidInput");
+    // Receive panel elements
+    elements.receivePanel = document.getElementById("receivePanel");
+    elements.receiveSenderDidInput = document.getElementById("receiveSenderDidInput");
     elements.fetchOfferButton = document.getElementById("fetchOfferButton");
-    elements.receiverStatus = document.getElementById("receiverStatus");
+    elements.receiveStatus = document.getElementById("receiveStatus");
     elements.receivedFileLink = document.getElementById("receivedFileLink");
+    elements.backToDashboardFromReceive = document.getElementById("backToDashboardFromReceive");
 }

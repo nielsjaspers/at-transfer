@@ -3,7 +3,8 @@
         "vite": "^6.3.5"
     },
     "dependencies": {
-        "@atproto/api": "^0.15.6"
+        "@atproto/api": "^0.15.6",
+        "@atproto/oauth-client-browser": "^0.3.16"
     },
     "scripts": {
         "dev": "vite",

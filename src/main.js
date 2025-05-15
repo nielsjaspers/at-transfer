@@ -1,294 +1,662 @@
-// Entry point for AT-Transfer P2P File Transfer app
-
-import { initUI } from "./ui/elements.js";
-import { setupSenderPeerEvents } from "./webrtc/peer.js";
-import { setupReceiverPeerEvents } from "./webrtc/peer.js";
-import { setupAuthHandlers, senderAgent, receiverAgent } from "./atproto/auth.js";
-import { elements } from "./ui/elements.js";
-import { postOffer, fetchOffer, postAnswer, fetchAnswer } from "./atproto/signaling.js";
+import { AtpAgent } from "@atproto/api";
+import { setStatus } from "./ui/status.js";
+import {
+    postOffer,
+    fetchOffer,
+    postAnswer,
+    fetchAnswer,
+} from "./atproto/signaling.js";
 import { resolveHandleToDid, getPdsEndpointForDid } from "./atproto/did.js";
 import { sendFileInChunks, assembleFile } from "./webrtc/fileTransfer.js";
-import { setStatus } from "./ui/status.js";
 import { ICE_SERVERS } from "./webrtc/peer.js";
 
-let senderPeerConnection = null;
-let senderDataChannel = null;
-let receiverPeerConnection = null;
-let receiverDataChannel = null;
+// ---- STATE ----
+let agent = null;
+let session = null;
+let userDid = null;
+let userHandle = null;
+let currentRole = null; // "send" or "receive"
+let peerConnection = null;
+let dataChannel = null;
 let fileToSend = null;
 let currentOfferSessionTimestamp = null;
+let currentSessionRkey = null;
 let receivedFileBuffer = [];
 let receivedFileName = "received_file";
 let receivedFileType = "application/octet-stream";
 
-document.addEventListener("DOMContentLoaded", () => {
-    initUI();
-    setupAuthHandlers();
+// Session persistence keys
+const SESSION_KEY = "at-transfer-session";
+const SERVICE_KEY = "at-transfer-service";
 
+// ---- UI SETUP ----
+function renderLoginScreen() {
+    const app = document.getElementById("app");
+    app.innerHTML = `
+    <div class="panel" id="loginPanel">
+      <h2>AT-Transfer</h2>
+      <p>Sign in with your Bluesky App Password to start transferring files peer-to-peer.</p>
+      <label for="loginHandleInput">Handle or DID</label>
+      <input id="loginHandleInput" type="text" placeholder="your.handle.bsky.social or did:plc:..." autocomplete="username" style="width:100%;margin-bottom:12px;" />
+      <label for="loginPasswordInput">App Password</label>
+      <input id="loginPasswordInput" type="password" placeholder="App Password" autocomplete="current-password" style="width:100%;margin-bottom:12px;" />
+      <button id="loginBtn" class="login-btn">Sign in</button>
+      <div id="loginStatus" class="status"></div>
+      <p style="font-size:0.95em;color:#888;margin-top:18px;">
+        <b>Security note:</b> Use a Bluesky App Password, not your main password.
+      </p>
+    </div>
+  `;
+    document.getElementById("loginBtn").onclick = async () => {
+        const handleOrDid = document
+            .getElementById("loginHandleInput")
+            .value.trim();
+        const password = document.getElementById("loginPasswordInput").value;
+        if (!handleOrDid || !password) {
+            setStatus(
+                "loginStatus",
+                "Please enter your handle and app password.",
+                "error",
+            );
+            return;
+        }
+        setStatus("loginStatus", "Logging in...", "info");
+        try {
+            await doAppPasswordLogin(handleOrDid, password);
+        } catch (e) {
+            setStatus("loginStatus", "Login failed: " + e.message, "error");
+        }
+    };
+}
 
-    // File input event for sender
-    elements.fileInput.addEventListener('change', (event) => {
-        fileToSend = event.target.files[0];
+function renderDashboard() {
+    const app = document.getElementById("app");
+    app.innerHTML = `
+    <div class="panel" id="dashboardPanel">
+      <h2>Welcome, ${userHandle || userDid}</h2>
+      <p>What do you want to do?</p>
+      <div style="display:flex;gap:18px;margin:18px 0;">
+        <button id="chooseSendBtn">Send File</button>
+        <button id="chooseReceiveBtn">Receive File</button>
+      </div>
+      <button id="logoutBtn" style="margin-top:12px;background:#d32f2f;">Log out</button>
+    </div>
+    <div id="rolePanel"></div>
+  `;
+    document.getElementById("chooseSendBtn").onclick = () => showSendPanel();
+    document.getElementById("chooseReceiveBtn").onclick = () =>
+        showReceivePanel();
+    document.getElementById("logoutBtn").onclick = async () => {
+        clearSession();
+        window.location.reload();
+    };
+}
+
+function showSendPanel() {
+    currentRole = "send";
+    const rolePanel = document.getElementById("rolePanel");
+    rolePanel.innerHTML = `
+    <div class="panel" id="sendPanel">
+      <h2>Send File</h2>
+      <label for="sendReceiverInput">Receiver DID or Handle</label>
+      <input id="sendReceiverInput" type="text" placeholder="did:plc:... or handle.bsky.social" autocomplete="off" />
+      <label for="sendFileInput">File to Send</label>
+      <input id="sendFileInput" type="file" />
+      <button id="sendOfferBtn">Send Offer</button>
+      <span class="status" id="sendStatus"></span>
+      <button id="backToDashboardFromSend" style="margin-top:18px;">Back</button>
+    </div>
+  `;
+    document.getElementById("sendFileInput").onchange = (e) => {
+        fileToSend = e.target.files[0];
         if (fileToSend) {
-            console.log(`[Sender] File selected: ${fileToSend.name} (${fileToSend.size} bytes)`);
-            elements.senderStatus.textContent = `Selected: ${fileToSend.name}`;
+            setStatus("sendStatus", `Selected: ${fileToSend.name}`, "info");
         }
-    });
+    };
+    document.getElementById("sendOfferBtn").onclick = sendOfferFlow;
+    document.getElementById("backToDashboardFromSend").onclick = () => {
+        document.getElementById("rolePanel").innerHTML = "";
+    };
+}
 
-    // --- Wire up Send Offer (PoC style) ---
-    elements.sendOfferButton.addEventListener("click", async () => {
-        if (!senderAgent || !fileToSend || !elements.senderDidInput.value) {
-            setStatus("senderStatus", "Error: Login, select file, and enter Receiver DID/Handle.", "error");
-            return;
-        }
-        setStatus("senderStatus", "Preparing offer...", "info");
-        console.log("[Sender] Preparing offer to send file...");
-        currentOfferSessionTimestamp = new Date().toISOString();
+function showReceivePanel() {
+    currentRole = "receive";
+    const rolePanel = document.getElementById("rolePanel");
+    rolePanel.innerHTML = `
+    <div class="panel" id="receivePanel">
+      <h2>Receive File</h2>
+      <label for="receiveSenderInput">Sender DID or Handle</label>
+      <input id="receiveSenderInput" type="text" placeholder="did:plc:... or handle.bsky.social" autocomplete="off" />
+      <button id="fetchOfferBtn">Fetch Offer</button>
+      <span class="status" id="receiveStatus"></span>
+      <a id="receivedFileLink" href="#" download style="display:none;">Download Received File</a>
+      <button id="backToDashboardFromReceive" style="margin-top:18px;">Back</button>
+    </div>
+  `;
+    document.getElementById("fetchOfferBtn").onclick = fetchOfferFlow;
+    document.getElementById("backToDashboardFromReceive").onclick = () => {
+        document.getElementById("rolePanel").innerHTML = "";
+    };
+}
 
+// ---- APP PASSWORD SESSION MANAGEMENT ----
+
+async function doAppPasswordLogin(identifier, password) {
+    // Discover PDS endpoint for handle or DID
+    let serviceUrl = "https://bsky.social"; // Default PDS
+    if (identifier.startsWith("did:")) {
         try {
-            const resolvedReceiverDid = await resolveHandleToDid(elements.senderDidInput.value.trim(), senderAgent);
-            console.log(`[Sender] Resolved target Receiver DID: ${resolvedReceiverDid}`);
-
-            senderPeerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-            setupSenderPeerEvents(senderPeerConnection, resolvedReceiverDid, currentOfferSessionTimestamp);
-
-            senderDataChannel = senderPeerConnection.createDataChannel('fileTransferChannel');
-            setupSenderDataChannelEvents(senderDataChannel);
-
-            const offer = await senderPeerConnection.createOffer();
-            await senderPeerConnection.setLocalDescription(offer);
-            // SDP will be posted in onicecandidate when all candidates are gathered
+            serviceUrl = await getPdsEndpointForDid(identifier);
         } catch (e) {
-            setStatus("senderStatus", `Offer Error: ${e.message}`, "error");
-            console.log(`[Sender] Error during offer creation: ${e.message}`);
+            throw new Error("Failed to discover PDS for DID: " + e.message);
         }
-    });
+    }
+    agent = new AtpAgent({ service: serviceUrl });
+    const res = await agent.login({ identifier, password });
+    session = agent.session;
+    userDid = agent.session.did;
+    userHandle = agent.session.handle;
+    // Persist session and service
+    localStorage.setItem(SESSION_KEY, JSON.stringify(agent.session));
+    localStorage.setItem(SERVICE_KEY, serviceUrl);
+    renderDashboard();
+}
 
-    // --- Wire up Fetch Offer (PoC style) ---
-    elements.fetchOfferButton.addEventListener("click", async () => {
-        if (!receiverAgent || !elements.receiverDidInput.value) {
-            setStatus("receiverStatus", "Error: Login and enter Sender DID/Handle.", "error");
-            return;
-        }
-        setStatus("receiverStatus", "Fetching offer...", "info");
-        console.log("[Receiver] Fetching offer from sender...");
-        receivedFileBuffer = [];
-        elements.receivedFileLink.style.display = 'none';
+function clearSession() {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SERVICE_KEY);
+    agent = null;
+    session = null;
+    userDid = null;
+    userHandle = null;
+}
 
-        try {
-            const resolvedSenderDid = await resolveHandleToDid(elements.receiverDidInput.value.trim(), receiverAgent);
-            console.log(`[Receiver] Resolved target Sender DID: ${resolvedSenderDid}`);
+async function tryRestoreSession() {
+    const sessionStr = localStorage.getItem(SESSION_KEY);
+    const serviceUrl =
+        localStorage.getItem(SERVICE_KEY) || "https://bsky.social";
+    if (!sessionStr) return false;
+    try {
+        const sess = JSON.parse(sessionStr);
+        agent = new AtpAgent({ service: serviceUrl });
+        await agent.resumeSession(sess);
+        session = agent.session;
+        userDid = agent.session.did;
+        userHandle = agent.session.handle;
+        return true;
+    } catch (e) {
+        clearSession();
+        return false;
+    }
+}
 
-            const senderPdsUrl = await getPdsEndpointForDid(resolvedSenderDid);
-            console.log(`[Receiver] Fetching offer from sender PDS endpoint: ${senderPdsUrl} for sender DID: ${resolvedSenderDid}`);
-            const { AtpAgent } = await import('@atproto/api');
-            const tempAgent = new AtpAgent({ service: senderPdsUrl });
+// ---- SEND FLOW ----
+async function sendOfferFlow() {
+    const receiverInput = document
+        .getElementById("sendReceiverInput")
+        .value.trim();
+    if (!agent || !fileToSend || !receiverInput) {
+        setStatus(
+            "sendStatus",
+            "Login, select file, and enter Receiver DID/Handle.",
+            "error",
+        );
+        return;
+    }
+    setStatus("sendStatus", "Preparing offer...", "info");
+    currentOfferSessionTimestamp = new Date().toISOString();
+    currentSessionRkey = crypto.randomUUID();
 
-            const record = await tempAgent.com.atproto.repo.getRecord({
-                repo: resolvedSenderDid,
-                collection: "app.at-transfer.signaloffer",
-                rkey: "self"
-            });
+    try {
+        const resolvedReceiverDid = await resolveHandleToDid(
+            receiverInput,
+            agent,
+        );
+        peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        dataChannel = peerConnection.createDataChannel("fileTransferChannel");
+        dataChannel.binaryType = "arraybuffer";
+        setupSenderDataChannelEvents(dataChannel);
 
-            if (!record?.data?.value) {
-                setStatus("receiverStatus", "No offer found from sender.", "error");
-                console.log("[Receiver] No offer record found.");
-                return;
-            }
+        peerConnection.onicecandidate = async (event) => {
+            if (event.candidate) return; // Wait for all candidates
+            setStatus("sendStatus", "Posting offer...", "info");
+            try {
+                const offerSdp = peerConnection.localDescription;
+                const offerDetails = {
+                    $type: "app.at-transfer.signaloffer",
+                    createdAt: new Date().toISOString(),
+                    sdp: offerSdp.sdp,
+                    fileName: fileToSend.name,
+                    fileSize: fileToSend.size,
+                    sessionTimestamp: currentOfferSessionTimestamp,
+                    // intendedReceiverDid will be added by postOffer in signaling.js
+                };
 
-            const offerRecord = record.data.value;
-            console.log(`[Receiver] Fetched offer record from sender: ${JSON.stringify(offerRecord)}`);
-            if (offerRecord.intendedReceiverDid && offerRecord.intendedReceiverDid !== receiverAgent.session.did) {
-                setStatus("receiverStatus", `Offer found (session: ${offerRecord.sessionTimestamp.slice(-10)}), but not intended for you.`, "error");
-                console.log(`[Receiver] Offer intended for DID ${offerRecord.intendedReceiverDid}, but receiver is ${receiverAgent.session.did}`);
-                return;
-            }
-            // Store fileName and fileType for use in download link
-            receivedFileName = offerRecord.fileName || "received_file";
-            receivedFileType = offerRecord.fileType || "application/octet-stream";
+                // Use postOffer from signaling.js
+                // resolvedReceiverDid is from the outer scope of sendOfferFlow
+                const {
+                    resolvedReceiverDid: actualPostedReceiverDid,
+                    sessionRkey,
+                } = await postOffer(
+                    agent,
+                    resolvedReceiverDid,
+                    offerDetails,
+                    currentSessionRkey,
+                );
 
-            console.log(`[Receiver] Offer record fetched (session: ${offerRecord.sessionTimestamp.slice(-10)}). Creating answer for sender.`);
-            setStatus("receiverStatus", `Offer (session: ${offerRecord.sessionTimestamp.slice(-10)}) fetched. Preparing answer...`, "info");
-
-            receiverPeerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-            setupReceiverPeerEvents(receiverPeerConnection, resolvedSenderDid, offerRecord.sessionTimestamp);
-
-            receiverPeerConnection.ondatachannel = (event) => {
-                console.log("[Receiver] Data channel received from sender. Ready to receive file.");
-                receiverDataChannel = event.channel;
-                setupReceiverDataChannelEvents(receiverDataChannel);
-            };
-
-            await receiverPeerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: offerRecord.sdp }));
-            const answer = await receiverPeerConnection.createAnswer();
-            await receiverPeerConnection.setLocalDescription(answer);
-            // SDP answer will be posted in onicecandidate
-        } catch (e) {
-            setStatus("receiverStatus", `Fetch/Answer Error: ${e.message}`, "error");
-            console.log(`[Receiver] Error during fetch/answer: ${e.message}`);
-        }
-    });
-
-    // --- Sender/Receiver Peer Events (PoC style) ---
-    function setupSenderPeerEvents(pc, targetReceiverDid, sessionTimestamp) {
-        pc.onicecandidate = async (event) => {
-            if (event.candidate) {
-                // ICE candidate gathering in progress
-            } else {
-                console.log("[Sender] All ICE candidates gathered. SDP offer complete. Posting to ATProto...");
-                elements.senderStatus.textContent = "SDP offer ready. Posting...";
-                try {
-                    const offerSdp = pc.localDescription;
-                    await senderAgent.com.atproto.repo.putRecord({
-                        repo: senderAgent.session.did,
-                        collection: "app.at-transfer.signaloffer",
-                        rkey: "self",
-                        record: {
-                            $type: "app.at-transfer.signaloffer",
-                            createdAt: new Date().toISOString(),
-                            sdp: offerSdp.sdp,
-                            fileName: fileToSend.name,
-                            fileSize: fileToSend.size,
-                            sessionTimestamp: sessionTimestamp,
-                            intendedReceiverDid: targetReceiverDid
+                if (actualPostedReceiverDid && sessionRkey) {
+                    setStatus(
+                        "sendStatus",
+                        "Offer posted. Waiting for answer...",
+                        "info",
+                    );
+                    // Display the session key for easy copy/paste
+                    const sendPanel = document.getElementById("sendPanel");
+                    if (sendPanel) {
+                        let rkeyElem =
+                            document.getElementById("sessionRkeyDisplay");
+                        if (!rkeyElem) {
+                            rkeyElem = document.createElement("div");
+                            rkeyElem.id = "sessionRkeyDisplay";
+                            rkeyElem.style.margin = "12px 0";
+                            rkeyElem.style.fontSize = "1.1em";
+                            sendPanel.appendChild(rkeyElem);
                         }
-                    });
-                    elements.senderStatus.textContent = `Offer posted (session: ${sessionTimestamp.slice(-10)}). Waiting for answer...`;
-                    console.log(`[Sender] Offer posted with sessionTimestamp: ${sessionTimestamp}`);
-                    pollForAnswer(targetReceiverDid, sessionTimestamp);
-                } catch (e) {
-                    elements.senderStatus.textContent = `Failed to post offer: ${e.message}`;
-                    console.log(`[Sender] Failed to post offer: ${e.message}`);
-                }
-            }
-        };
-        pc.onconnectionstatechange = () => {
-            console.log(`[Sender] PeerConnection state changed: ${pc.connectionState}`);
-            elements.senderStatus.textContent = `Connection: ${pc.connectionState}`;
-            if (pc.connectionState === 'connected') { console.log("[Sender] PEERS CONNECTED!"); }
-        };
-    }
-
-    function setupSenderDataChannelEvents(dc) {
-        dc.onopen = () => {
-            console.log("[Sender] Data channel is open. Starting file transfer to receiver.");
-            elements.senderStatus.textContent = "Data channel open. Sending file...";
-            if (fileToSend && dc.readyState === "open") {
-                sendFileInChunks(fileToSend, dc, (sent, total) => {
-                    elements.senderStatus.textContent = `Sending file: ${Math.round((sent/total)*100)}%`;
-                }).then(() => {
-                    // After sending all chunks and EOF, close the data channel
-                    dc.close();
-                });
-            } else {
-                console.log("[Sender] Data channel open but fileToSend or data channel not ready.");
-            }
-        };
-        dc.onclose = () => { console.log("[Sender] Data channel closed after file transfer."); elements.senderStatus.textContent = "Data channel closed."; };
-        dc.onerror = (error) => { console.log(`[Sender] Data channel error: ${error}`); elements.senderStatus.textContent = `DC Error: ${error}`; };
-    }
-
-    async function pollForAnswer(receiverDid, offerSessionTimestamp) {
-        console.log(`[Sender] Polling for answer from receiver DID ${receiverDid} for offer session ${offerSessionTimestamp.slice(-10)}...`);
-        try {
-            const receiverPdsUrl = await getPdsEndpointForDid(receiverDid);
-            console.log(`[Sender] Polling answer from receiver PDS endpoint: ${receiverPdsUrl} for receiver DID: ${receiverDid}`);
-            const { AtpAgent } = await import('@atproto/api');
-            const tempAgent = new AtpAgent({ service: receiverPdsUrl });
-
-            const record = await tempAgent.com.atproto.repo.getRecord({
-                repo: receiverDid,
-                collection: "app.at-transfer.signalanswer",
-                rkey: "self"
-            });
-
-            if (record?.data?.value) {
-                const answerRecord = record.data.value;
-                console.log(`[Sender] Fetched answer record from receiver: ${JSON.stringify(answerRecord)}`);
-                if (answerRecord.offerSessionTimestamp === offerSessionTimestamp &&
-                    answerRecord.intendedSenderDid === senderAgent.session.did) {
-                    console.log("[Sender] Matching answer record found! Applying remote description.");
-                    elements.senderStatus.textContent = "Answer found. Applying...";
-                    await senderPeerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: answerRecord.sdp }));
-                    console.log("[Sender] Remote description (answer) successfully set on PeerConnection.");
-                    return;
-                } else {
-                    console.log(`[Sender] Found answer, but for different session/sender. Expected offerTS: ${offerSessionTimestamp.slice(-10)}, Got: ${answerRecord.offerSessionTimestamp?.slice(-10)}`);
-                }
-            } else {
-                console.log("[Sender] No answer record found yet for this session.");
-            }
-        } catch (e) { console.log(`[Sender] Poll error (or no answer yet): ${e.message}`); }
-        setTimeout(() => pollForAnswer(receiverDid, offerSessionTimestamp), 5000);
-    }
-
-    function setupReceiverPeerEvents(pc, offerOwnerDid, offerSessionTimestamp) {
-        pc.onicecandidate = async (event) => {
-            if (event.candidate) {
-                // ICE candidate gathering in progress
-            } else {
-                console.log("[Receiver] All ICE candidates gathered. SDP answer complete. Posting to ATProto...");
-                elements.receiverStatus.textContent = "SDP answer ready. Posting...";
-                try {
-                    const answerSdp = pc.localDescription;
-                    await receiverAgent.com.atproto.repo.putRecord({
-                        repo: receiverAgent.session.did,
-                        collection: "app.at-transfer.signalanswer",
-                        rkey: "self",
-                        record: {
-                            $type: "app.at-transfer.signalanswer",
-                            createdAt: new Date().toISOString(),
-                            sdp: answerSdp.sdp,
-                            offerSessionTimestamp: offerSessionTimestamp,
-                            intendedSenderDid: offerOwnerDid
+                        rkeyElem.innerHTML = `
+                            <b>Session key (rkey):</b>
+                            <span style="display:inline-flex;align-items:center;gap:8px;">
+                                <code id="sessionRkeyCode" style="font-size:1.05em;padding:2px 6px;background:#f4f4f4;border-radius:4px;">${sessionRkey}</code>
+                                <button id="copyRkeyBtn" type="button" aria-label="Copy session key" style="padding:2px 8px;font-size:0.95em;cursor:pointer;">Copy</button>
+                                <span id="copyRkeyStatus" style="font-size:0.95em;color:#1a9c3c;display:none;">Copied!</span>
+                            </span>
+                        `;
+                        const copyBtn = document.getElementById("copyRkeyBtn");
+                        const codeElem =
+                            document.getElementById("sessionRkeyCode");
+                        const statusElem =
+                            document.getElementById("copyRkeyStatus");
+                        if (copyBtn && codeElem) {
+                            copyBtn.onclick = async () => {
+                                try {
+                                    await navigator.clipboard.writeText(
+                                        sessionRkey,
+                                    );
+                                    if (statusElem) {
+                                        statusElem.style.display = "inline";
+                                        setTimeout(() => {
+                                            statusElem.style.display = "none";
+                                        }, 1200);
+                                    }
+                                } catch (e) {
+                                    if (statusElem) {
+                                        statusElem.textContent =
+                                            "Failed to copy";
+                                        statusElem.style.color = "#d32f2f";
+                                        statusElem.style.display = "inline";
+                                        setTimeout(() => {
+                                            statusElem.style.display = "none";
+                                            statusElem.textContent = "Copied!";
+                                            statusElem.style.color = "#1a9c3c";
+                                        }, 1200);
+                                    }
+                                }
+                            };
                         }
-                    });
-                    elements.receiverStatus.textContent = `Answer posted for offer session ${offerSessionTimestamp.slice(-10)}.`;
-                    console.log(`[Receiver] Answer posted for offer session ${offerSessionTimestamp}`);
-                } catch (e) {
-                    elements.receiverStatus.textContent = `Failed to post answer: ${e.message}`;
-                    console.log(`[Receiver] Failed to post answer: ${e.message}`);
-                }
-            }
-        };
-        pc.onconnectionstatechange = () => {
-            console.log(`[Receiver] PeerConnection state changed: ${pc.connectionState}`);
-            elements.receiverStatus.textContent = `Connection: ${pc.connectionState}`;
-            if (pc.connectionState === 'connected') { console.log("[Receiver] PEERS CONNECTED!"); }
-        };
-    }
-
-    function setupReceiverDataChannelEvents(dc) {
-        console.log("[Receiver] Data channel is open. Ready to receive file data.");
-        dc.onmessage = (event) => {
-            if (typeof event.data === "string") {
-                // handle EOF or metadata
-                try {
-                    const msg = JSON.parse(event.data);
-                    if (msg.type === "EOF") {
-                        // Do nothing here, wait for channel close to assemble file
-                        return;
                     }
-                } catch {}
-            } else if (event.data instanceof ArrayBuffer) {
-                receivedFileBuffer.push(event.data);
-                // update received bytes
-                let receivedBytes = receivedFileBuffer.reduce((sum, chunk) => sum + (chunk instanceof ArrayBuffer ? chunk.byteLength : 0), 0);
-                elements.receiverStatus.textContent = `Received ${Math.round(receivedBytes / 1024)} KB`;
+                    pollForAnswer(
+                        actualPostedReceiverDid, // Use the DID returned by postOffer
+                        currentOfferSessionTimestamp,
+                        sessionRkey,
+                    );
+                } else {
+                    setStatus(
+                        "sendStatus",
+                        "Failed to post offer (receiver DID not resolved/returned).",
+                        "error",
+                    );
+                }
+            } catch (e) {
+                setStatus(
+                    "sendStatus",
+                    `Failed to post offer: ${e.message}`,
+                    "error",
+                );
             }
         };
-        dc.onclose = () => {
-            console.log("[Receiver] Data channel closed after file reception.");
-            elements.receiverStatus.textContent = "Data channel closed. Assembling file...";
-            if (receivedFileBuffer.length > 0) {
-                const url = assembleFile(receivedFileBuffer, receivedFileName, receivedFileType);
-                elements.receivedFileLink.href = url;
-                elements.receivedFileLink.download = receivedFileName;
-                elements.receivedFileLink.textContent = `Download ${receivedFileName} (${Math.round((receivedFileBuffer.reduce((sum, chunk) => sum + (chunk instanceof ArrayBuffer ? chunk.byteLength : 0), 0)) / 1024)} KB)`;
-                elements.receivedFileLink.style.display = "block";
-                elements.receiverStatus.textContent = "File received and assembled! Download link should be visible.";
-            }
+
+        peerConnection.onconnectionstatechange = () => {
+            setStatus(
+                "sendStatus",
+                `Connection: ${peerConnection.connectionState}`,
+                "info",
+            );
         };
-        dc.onerror = (error) => { console.log(`[Receiver] Data channel error: ${error}`); elements.receiverStatus.textContent = `DC Error: ${error}`; };
+
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+    } catch (e) {
+        setStatus("sendStatus", `Offer Error: ${e.message}`, "error");
     }
+}
+
+function setupSenderDataChannelEvents(dc) {
+    dc.onopen = () => {
+        setStatus("sendStatus", "Data channel open. Sending file...", "info");
+        if (fileToSend && dc.readyState === "open") {
+            sendFileInChunks(fileToSend, dc, (sent, total) => {
+                setStatus(
+                    "sendStatus",
+                    `Sending file: ${Math.round((sent / total) * 100)}%`,
+                    "info",
+                );
+            }).then(async () => {
+                // Wait for bufferedAmount to be zero before closing
+                while (dc.bufferedAmount > 0) {
+                    await new Promise(res => setTimeout(res, 20));
+                }
+                // Give the EOF a moment to flush
+                setTimeout(() => {
+                    dc.close();
+                }, 50);
+            });
+        }
+    };
+    dc.onclose = () => {
+        setStatus("sendStatus", "Data channel closed.", "info");
+        // Remove session key display when transfer is done
+        const rkeyElem = document.getElementById("sessionRkeyDisplay");
+        if (rkeyElem) rkeyElem.remove();
+    };
+    dc.onerror = (error) =>
+        setStatus("sendStatus", `DC Error: ${error}`, "error");
+}
+
+async function pollForAnswer(receiverDid, offerSessionTimestamp, sessionRkey) {
+    try {
+        const receiverPdsUrl = await getPdsEndpointForDid(receiverDid);
+        const { AtpAgent } = await import("@atproto/api");
+        const tempAgent = new AtpAgent({ service: receiverPdsUrl });
+
+        const record = await tempAgent.com.atproto.repo.getRecord({
+            repo: receiverDid,
+            collection: "app.at-transfer.signalanswer",
+            rkey: sessionRkey,
+        });
+
+        if (record?.data?.value) {
+            const answerRecord = record.data.value;
+            if (
+                answerRecord.sessionTimestamp === offerSessionTimestamp &&
+                answerRecord.intendedSenderDid === agent.did
+            ) {
+                setStatus("sendStatus", "Answer found. Applying...", "success");
+                await peerConnection.setRemoteDescription(
+                    new RTCSessionDescription({
+                        type: "answer",
+                        sdp: answerRecord.sdp,
+                    }),
+                );
+                // Cleanup: delete offer record after answer is received
+                try {
+                    await agent.com.atproto.repo.deleteRecord({
+                        repo: agent.session.did,
+                        collection: "app.at-transfer.signaloffer",
+                        rkey: sessionRkey,
+                    });
+                    setStatus(
+                        "sendStatus",
+                        "Offer record deleted after answer.",
+                        "info",
+                    );
+                } catch (e) {
+                    setStatus(
+                        "sendStatus",
+                        "Failed to delete offer record: " + e.message,
+                        "warning",
+                    );
+                }
+                return;
+            }
+        }
+    } catch (e) {}
+    setTimeout(
+        () => pollForAnswer(receiverDid, offerSessionTimestamp, sessionRkey),
+        5000,
+    );
+}
+
+// ---- RECEIVE FLOW ----
+async function fetchOfferFlow() {
+    const senderInput = document
+        .getElementById("receiveSenderInput")
+        .value.trim();
+    if (!agent || !senderInput) {
+        setStatus(
+            "receiveStatus",
+            "Login and enter Sender DID/Handle.",
+            "error",
+        );
+        return;
+    }
+    setStatus("receiveStatus", "Fetching offer...", "info");
+    receivedFileBuffer = [];
+    document.getElementById("receivedFileLink").style.display = "none";
+
+    // Prompt user for session key (rkey) or generate from offer sessionTimestamp
+    let sessionRkey = prompt(
+        "Enter session key (rkey) for this transfer (ask sender):",
+    );
+    if (!sessionRkey) {
+        setStatus(
+            "receiveStatus",
+            "Session key (rkey) is required to fetch offer.",
+            "error",
+        );
+        return;
+    }
+    currentSessionRkey = sessionRkey;
+
+    try {
+        const resolvedSenderDid = await resolveHandleToDid(senderInput, agent);
+        const senderPdsUrl = await getPdsEndpointForDid(resolvedSenderDid);
+        const { AtpAgent } = await import("@atproto/api");
+        const tempAgent = new AtpAgent({ service: senderPdsUrl });
+
+        const record = await tempAgent.com.atproto.repo.getRecord({
+            repo: resolvedSenderDid,
+            collection: "app.at-transfer.signaloffer",
+            rkey: sessionRkey,
+        });
+
+        if (!record?.data?.value) {
+            setStatus("receiveStatus", "No offer found from sender.", "error");
+            return;
+        }
+
+        const offerRecord = record.data.value;
+        if (
+            offerRecord.intendedReceiverDid &&
+            offerRecord.intendedReceiverDid !== agent.did
+        ) {
+            setStatus(
+                "receiveStatus",
+                `Offer found (session: ${offerRecord.sessionTimestamp.slice(-10)}), but not intended for you.`,
+                "error",
+            );
+            return;
+        }
+        receivedFileName = offerRecord.fileName || "received_file";
+        receivedFileType = offerRecord.fileType || "application/octet-stream";
+
+        setStatus(
+            "receiveStatus",
+            `Offer (session: ${offerRecord.sessionTimestamp.slice(-10)}) fetched. Preparing answer...`,
+            "info",
+        );
+
+        peerConnection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        peerConnection.ondatachannel = (event) => {
+            dataChannel = event.channel;
+            setupReceiverDataChannelEvents(dataChannel);
+        };
+
+        peerConnection.onicecandidate = async (event) => {
+            if (event.candidate) return;
+            setStatus("receiveStatus", "Posting answer...", "info");
+            try {
+                const answerSdp = peerConnection.localDescription;
+                await agent.com.atproto.repo.putRecord({
+                    repo: agent.session.did,
+                    collection: "app.at-transfer.signalanswer",
+                    rkey: sessionRkey,
+                    record: {
+                        $type: "app.at-transfer.signalanswer",
+                        createdAt: new Date().toISOString(),
+                        sdp: answerSdp.sdp,
+                        sessionTimestamp: offerRecord.sessionTimestamp,
+                        intendedSenderDid: resolvedSenderDid,
+                    },
+                });
+                setStatus(
+                    "receiveStatus",
+                    "Answer posted. Waiting for file...",
+                    "info",
+                );
+            } catch (e) {
+                setStatus(
+                    "receiveStatus",
+                    `Failed to post answer: ${e.message}`,
+                    "error",
+                );
+            }
+        };
+
+        peerConnection.onconnectionstatechange = () => {
+            setStatus(
+                "receiveStatus",
+                `Connection: ${peerConnection.connectionState}`,
+                "info",
+            );
+        };
+
+        await peerConnection.setRemoteDescription(
+            new RTCSessionDescription({ type: "offer", sdp: offerRecord.sdp }),
+        );
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+    } catch (e) {
+        setStatus("receiveStatus", `Fetch/Answer Error: ${e.message}`, "error");
+    }
+}
+
+function setupReceiverDataChannelEvents(dc) {
+    setStatus("receiveStatus", "Data channel open. Receiving...", "info");
+    let transferTimeout = null;
+    let eofReceived = false;
+
+    function cleanupAndAssemble() {
+        if (receivedFileBuffer.length > 0) {
+            const url = assembleFile(
+                receivedFileBuffer,
+                receivedFileName,
+                receivedFileType,
+            );
+            const link = document.getElementById("receivedFileLink");
+            link.href = url;
+            link.download = receivedFileName;
+            link.textContent = `Download ${receivedFileName} (${Math.round(receivedFileBuffer.reduce((sum, chunk) => sum + (chunk instanceof ArrayBuffer ? chunk.byteLength : 0), 0) / 1024)} KB)`;
+            link.style.display = "block";
+            setStatus(
+                "receiveStatus",
+                "File received and assembled! Download link should be visible.",
+                "success",
+            );
+            // Cleanup: delete answer record after file is received
+            try {
+                agent.com.atproto.repo.deleteRecord({
+                    repo: agent.session.did,
+                    collection: "app.at-transfer.signalanswer",
+                    rkey: currentSessionRkey,
+                });
+                setStatus("receiveStatus", "Answer record deleted after file received.", "info");
+            } catch (e) {
+                setStatus("receiveStatus", "Failed to delete answer record: " + e.message, "warning");
+            }
+        } else {
+            setStatus("receiveStatus", "No data received.", "error");
+        }
+        if (transferTimeout) clearTimeout(transferTimeout);
+    }
+
+    function startTimeout() {
+        if (transferTimeout) clearTimeout(transferTimeout);
+        transferTimeout = setTimeout(() => {
+            setStatus("receiveStatus", "Transfer timed out. Cleaning up.", "error");
+            cleanupAndAssemble();
+            if (dc.readyState === "open" || dc.readyState === "connecting") {
+                dc.close();
+            }
+        }, 20000); // 20 seconds timeout after last chunk/EOF
+    }
+
+    startTimeout();
+
+    dc.onmessage = (event) => {
+        startTimeout();
+        if (typeof event.data === "string") {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === "EOF") {
+                    console.log("Received EOF");
+                    eofReceived = true;
+                    cleanupAndAssemble();
+                    if (dc.readyState === "open" || dc.readyState === "connecting") {
+                        dc.close();
+                    }
+                    return;
+                }
+            } catch {}
+        } else if (event.data instanceof ArrayBuffer) {
+            receivedFileBuffer.push(event.data);
+            console.log("Received chunk, total:", receivedFileBuffer.length);
+            let receivedBytes = receivedFileBuffer.reduce(
+                (sum, chunk) =>
+                    sum + (chunk instanceof ArrayBuffer ? chunk.byteLength : 0),
+                0,
+            );
+            setStatus(
+                "receiveStatus",
+                `Received ${Math.round(receivedBytes / 1024)} KB`,
+                "info",
+            );
+        }
+    };
+    dc.onclose = () => {
+        if (!eofReceived) {
+            setStatus(
+                "receiveStatus",
+                "Data channel closed. Assembling file (EOF not seen, may be incomplete)...",
+                "warning",
+            );
+            cleanupAndAssemble();
+        } else {
+            setStatus("receiveStatus", "Data channel closed.", "info");
+        }
+        if (transferTimeout) clearTimeout(transferTimeout);
+    };
+    dc.onerror = (error) =>
+        setStatus("receiveStatus", `DC Error: ${error}`, "error");
+}
+
+// ---- Utility: Generate random session rkey ----
+/* No longer needed: replaced by crypto.randomUUID() */
+
+// ---- APP INIT ----
+document.addEventListener("DOMContentLoaded", async () => {
+    const restored = await tryRestoreSession();
+    if (!restored) {
+        renderLoginScreen();
+        return;
+    }
+    renderDashboard();
 });
